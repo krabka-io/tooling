@@ -36,7 +36,7 @@ from that workspace's `Cargo.toml`, so there is no version to edit by hand.
 
 Every published chart tarball is signed and carries supply-chain provenance.
 The chart signing **public key is in this directory** as
-[`krabka-charts.pub.asc`](krabka-charts.pub.asc). It holds three keys, so a key
+[`krabka-charts.pub.asc`](krabka-charts.pub.asc). It holds one key, so a key
 rotation does not break verification of an older chart. A mirror of the file is
 at `https://krabka-io.github.io/charts/krabka-charts.pub.asc`.
 
@@ -84,6 +84,20 @@ Rotate the private key and this file together: append the new public key here,
 then update the secrets. Keep the private key and its revocation certificate in
 a secrets manager.
 
-The key material still carries the old `Crabka Charts <charts@crabka.dev>` user
-ID. The user ID is signed into the key, so it cannot be renamed. It changes
-only when the project generates a new key.
+The key is `Krabka Charts <charts@krabka.dev>`, RSA 4096, fingerprint
+`74A6 7D5C F9AE 199A 45D2  2E42 594B D543 4544 D339`. It expires on
+2028-09-11.
+
+### The old Crabka key is revoked
+
+Charts signed before 2026-09-12 used a different key, with the user ID
+`Crabka Charts <charts@crabka.dev>`. That key is no longer valid and this
+repository no longer carries it. **Signatures made with it do not verify.**
+
+Krabka is undeployed, so no released artifact depends on the old signatures. Do
+not re-add the old public key to make an old `.prov` file verify. Sign the chart
+again with the current key instead.
+
+The new key has no passphrase, so `HELM_GPG_PASSPHRASE` is an empty string.
+Set a passphrase on the private key if you prefer, and update that secret to
+match.
