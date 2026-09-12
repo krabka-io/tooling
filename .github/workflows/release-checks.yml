@@ -1,0 +1,69 @@
+# Shared release gate. Every krabka-io Rust repository calls this workflow
+# instead of holding a copy of the scripts:
+#
+#   jobs:
+#     release-checks:
+#       uses: krabka-io/tooling/.github/workflows/release-checks.yml@main
+#       with:
+#         rust-toolchain: "1.97.0"
+#
+# The workflow checks out the calling repository first, so both scripts see the
+# caller's tree. See release/README.md for the full contract.
+name: release-checks
+
+on:
+  workflow_call:
+    inputs:
+      rust-toolchain:
+        description: The Rust toolchain that `cargo metadata` runs under.
+        type: string
+        default: "1.97.0"
+      allowlist-file:
+        description: Path, in the calling repository, to the published-crate allowlist.
+        type: string
+        default: publish-allowlist.txt
+      tooling-ref:
+        description: The ref of krabka-io/tooling to run the scripts from. Pin it to a tag for a release gate.
+        type: string
+        default: main
+    secrets:
+      tooling-token:
+        description: >-
+          A token that can read krabka-io/tooling. It is needed only while that
+          repository is private. Leave it unset once the repository is public.
+        required: false
+
+jobs:
+  release-checks:
+    name: release-checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      # In a called workflow this checks out the CALLING repository at the
+      # commit that called it. That tree is what both scripts below read.
+      - name: check out the calling repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The called workflow file arrives on its own. The scripts it runs do
+      # not, so this second checkout brings them in beside the caller's tree.
+      - name: check out the shared tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: krabka-io/tooling
+          ref: ${{ inputs.tooling-ref }}
+          path: .krabka-tooling
+          token: ${{ secrets.tooling-token || github.token }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ inputs.rust-toolchain }}
+
+      # No toolchain is needed for this one, and it is the cheapest check, so
+      # it runs first.
+      - name: html_root_url in sync
+        run: ./.krabka-tooling/scripts/html-root-url.sh
+
+      - name: published crate allowlist
+        run: ./.krabka-tooling/release/check-publish-allowlist.sh "${{ inputs.allowlist-file }}"

@@ -1,0 +1,124 @@
+package:
+  name: krabka
+  version: 0.1.1
+  epoch: 0
+  description: Krabka server binaries (broker, CLI, operator, gateway, schema-registry, Connect worker, bench driver)
+  copyright:
+    - license: Apache-2.0
+
+environment:
+  contents:
+    repositories:
+      - https://packages.wolfi.dev/os
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    packages:
+      - ca-certificates-bundle
+      - build-base
+      - busybox
+      - git
+      - openssl-dev
+      - pkgconf
+      - rustup
+
+# A single cargo build compiles the shared dependency graph (protocol, log,
+# compression, security, metadata, raft, ...) exactly once and emits every
+# server binary. Each image's contents are carved out into a subpackage below,
+# so `melange build` produces the same set of APKs that the four old per-binary
+# recipes did — without recompiling the workspace once per image.
+pipeline:
+  - name: Install pinned Rust toolchain
+    runs: |
+      rustup-init -y --default-toolchain none --no-modify-path
+      export PATH="$HOME/.cargo/bin:$PATH"
+      rustup toolchain install 1.97.0 --component cargo --profile minimal
+      rustup default 1.97.0
+  - name: Build all krabka binaries
+    runs: |
+      export PATH="$HOME/.cargo/bin:$PATH"
+      # When `melange build --cache-dir` is supplied, the host cache directory
+      # is mounted read-write at /var/cache/melange. Point CARGO_HOME and the
+      # target dir there so the crate registry and compiled artifacts survive
+      # across CI runs. When no cache dir is mounted (e.g. a plain local
+      # `melange build`), fall back to the in-tree target dir — the build still
+      # works, it just isn't cached. Either way the binaries are staged into
+      # ./dist so the subpackage pipelines below have a stable path to install
+      # from (subpackage `runs` blocks don't inherit this step's env).
+      cache=/var/cache/melange
+      if mkdir -p "$cache/cargo" 2>/dev/null && [ -w "$cache" ]; then
+        export CARGO_HOME="$cache/cargo"
+        export CARGO_TARGET_DIR="$cache/target"
+        target="$cache/target"
+      else
+        target="target"
+      fi
+      cargo build --release \
+        -p krabka-broker -p krabka-cli -p krabka-operator \
+        -p krabka-grpc-gateway -p krabka-schema-registry \
+        -p krabka-connect-worker -p krabka-bench-driver \
+        -p krabka-gres -p krabka-gres-activator \
+        --bin krabka-broker --bin krabka --bin krabka-operator \
+        --bin krabka-grpc-gateway --bin krabka-schema-registry \
+        --bin krabka-connect-worker \
+        --bin krabka-bench-driver --bin krabka-bench-report \
+        --bin krabka-gres --bin krabka-gres-activator
+      mkdir -p dist
+      for bin in krabka-broker krabka krabka-operator krabka-grpc-gateway \
+                 krabka-schema-registry \
+                 krabka-connect-worker krabka-bench-driver krabka-bench-report \
+                 krabka-gres krabka-gres-activator; do
+        install -m 0755 "$target/release/$bin" "dist/$bin"
+      done
+
+subpackages:
+  - name: krabka-broker
+    description: Single-node Apache Kafka-compatible broker (MVP) plus the krabka operator CLI
+    pipeline:
+      - runs: |
+          install -D -m 0755 dist/krabka-broker "${{targets.subpkgdir}}/usr/bin/krabka-broker"
+          install -D -m 0755 dist/krabka "${{targets.subpkgdir}}/usr/bin/krabka"
+
+  - name: krabka-operator
+    description: Kubernetes operator for Krabka clusters
+    pipeline:
+      - runs: |
+          install -D -m 0755 dist/krabka-operator "${{targets.subpkgdir}}/usr/bin/krabka-operator"
+
+  - name: krabka-grpc-gateway
+    description: Connect-RPC and HTTP gateway for Krabka topics
+    pipeline:
+      - runs: |
+          install -D -m 0755 dist/krabka-grpc-gateway "${{targets.subpkgdir}}/usr/bin/krabka-grpc-gateway"
+
+  - name: krabka-schema-registry
+    description: Confluent Schema Registry-compatible service for Krabka
+    pipeline:
+      - runs: |
+          install -D -m 0755 dist/krabka-schema-registry "${{targets.subpkgdir}}/usr/bin/krabka-schema-registry"
+
+  - name: krabka-connect-worker
+    description: Managed Postgres CDC connector worker for Krabka
+    pipeline:
+      - runs: |
+          install -D -m 0755 dist/krabka-connect-worker "${{targets.subpkgdir}}/usr/bin/krabka-connect-worker"
+
+  - name: krabka-gres
+    description: Gres PostgreSQL-compatible tenant compute
+    pipeline:
+      - runs: |
+          install -D -m 0755 dist/krabka-gres "${{targets.subpkgdir}}/usr/bin/krabka-gres"
+
+  - name: krabka-gres-activator
+    description: Gres scale-to-zero connection activator
+    pipeline:
+      - runs: |
+          install -D -m 0755 dist/krabka-gres-activator "${{targets.subpkgdir}}/usr/bin/krabka-gres-activator"
+
+  - name: krabka-bench-driver
+    description: Load driver + report aggregator for the Krabka vs Strimzi benchmark harness
+    pipeline:
+      - runs: |
+          install -D -m 0755 dist/krabka-bench-driver "${{targets.subpkgdir}}/usr/bin/krabka-bench-driver"
+          install -D -m 0755 dist/krabka-bench-report "${{targets.subpkgdir}}/usr/bin/krabka-bench-report"
+          mkdir -p "${{targets.subpkgdir}}/etc/krabka-bench/scenarios"
+          cp -r bench/scenarios/. "${{targets.subpkgdir}}/etc/krabka-bench/scenarios/"

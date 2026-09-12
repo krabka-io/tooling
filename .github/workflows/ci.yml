@@ -1,0 +1,112 @@
+# The gate for this repository. It holds no Rust, so there is no cargo job.
+# The checks here are the ones that can run without the repository under test:
+# the shell scripts parse, the Python compiles, and the packaging inputs are
+# well-formed YAML.
+#
+# The krabka repositories lint Rust with clippy through Bazel and lint no shell
+# or Python. This repository does not add shellcheck or ruff on its own.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  syntax:
+    name: syntax
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: shell scripts parse
+        run: |
+          status=0
+          while IFS= read -r script; do
+            echo "bash -n ${script}"
+            bash -n "${script}" || status=1
+          done < <(find release scripts -name '*.sh' -type f | sort)
+          exit "${status}"
+
+      - name: shell scripts are executable
+        run: |
+          status=0
+          while IFS= read -r script; do
+            if [ ! -x "${script}" ]; then
+              echo "::error file=${script}::not executable; run chmod +x"
+              status=1
+            fi
+          done < <(find release scripts -name '*.sh' -type f | sort)
+          exit "${status}"
+
+      - name: python compiles
+        run: python3 -m compileall -q release
+
+      # `check-publish-allowlist.sh` embeds a Python program in a heredoc, so
+      # `compileall` never sees it. This extracts that program and compiles it.
+      - name: embedded python compiles
+        run: |
+          python3 - <<'PY'
+          import pathlib
+
+          script = pathlib.Path("release/check-publish-allowlist.sh").read_text()
+          body = script.split("<<'PY'", 1)[1].rsplit("\nPY", 1)[0]
+          compile(body, "release/check-publish-allowlist.sh", "exec")
+          print("embedded python compiles")
+          PY
+
+      - name: packaging inputs are valid yaml
+        run: |
+          python3 - <<'PY'
+          import pathlib
+          import sys
+
+          import yaml
+
+          status = 0
+          for path in sorted(pathlib.Path("packaging").rglob("*.yaml")):
+              try:
+                  # melange expands `${{targets.destdir}}` itself, and that is
+                  # plain text to a YAML parser, so no pre-pass is needed.
+                  yaml.safe_load(path.read_text())
+              except yaml.YAMLError as error:
+                  print(f"::error file={path}::{error}")
+                  status = 1
+              else:
+                  print(f"ok {path}")
+          sys.exit(status)
+          PY
+
+      - name: release-plz templates are valid toml
+        run: |
+          python3 - <<'PY'
+          import pathlib
+          import sys
+          import tomllib
+
+          status = 0
+          for path in sorted(pathlib.Path("release").glob("*.toml")):
+              try:
+                  tomllib.loads(path.read_text())
+              except tomllib.TOMLDecodeError as error:
+                  print(f"::error file={path}::{error}")
+                  status = 1
+              else:
+                  print(f"ok {path}")
+          sys.exit(status)
+          PY
+
+      # The chart signing public key is the one file here that a user verifies
+      # a release against. A truncated or re-wrapped copy fails silently at
+      # `helm install --verify`, so the gate reads it back.
+      - name: chart signing public key parses
+        run: gpg --show-keys --with-colons charts/krabka-charts.pub.asc

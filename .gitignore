@@ -1,0 +1,15 @@
+# melange / apko build artifacts
+.melange-cache/
+melange.rsa
+melange.rsa.pub
+packages/
+sbom-*.spdx.json
+
+# Python bytecode from local runs of the release tools
+__pycache__/
+
+# Editor and OS files
+.idea/
+.vscode/
+*.iml
+.DS_Store

@@ -1,0 +1,22 @@
+# Shared release-plz workspace defaults for every krabka-io Rust repository.
+#
+# Copy this file to the repository root, then add one `[[package]]` entry per
+# crate in that workspace. The package table is repository-specific, so it does
+# not live here. `release/check-publish-allowlist.sh` compares the table in the
+# repository against that repository's `publish-allowlist.txt`.
+#
+# `changelog_config` names `release-plz-changelog.toml`, which each repository
+# copies from this directory without a change.
+
+[workspace]
+changelog_update = true
+git_release_enable = true
+git_tag_enable = true
+publish = true
+publish_no_verify = true
+release = true
+changelog_config = "release-plz-changelog.toml"
+git_release_type = "auto"
+semver_check = false
+pr_branch_prefix = "release-plz-"
+pr_labels = ["release"]
