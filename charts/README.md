@@ -12,92 +12,86 @@ of them share: the chart signing public key.
 | `krabka-rebalancer` | [`krabka-io/krabka-rebalancer`](https://github.com/krabka-io/krabka-rebalancer) under `charts/` |
 | `krabka-schema-registry` | [`krabka-io/krabka-schema-registry`](https://github.com/krabka-io/krabka-schema-registry) under `charts/` |
 
-Each repository packages and signs its own chart on release. Each one then
-pushes the tarball, the `.prov` file and the cosign bundle to the shared index.
+Component repositories do not package or sign their charts. The index job in
+krabka-io.github.io does both. See below.
 
 ## The published index
 
 The aggregated Helm repository index lives in
 [`krabka-io/krabka-io.github.io`](https://github.com/krabka-io/krabka-io.github.io)
-and is served from **https://krabka-io.github.io/charts**. It is the only
-index a user adds. It lists the charts from all three component repositories:
+and is served from https://krabka.io/charts. It is the only index a user adds,
+and it lists the charts from all three component repositories:
 
 ```sh
-helm repo add krabka https://krabka-io.github.io/charts
+helm repo add krabka https://krabka.io/charts
 helm repo update
 helm search repo krabka
 ```
 
-The chart `version` and `appVersion` fields and the default image tags track
-the crate release. The package step in each component repository derives them
-from that workspace's `Cargo.toml`, so there is no version to edit by hand.
+The older host, `https://krabka-io.github.io/charts`, redirects to it.
+
+The `helm-index` workflow runs `scripts/build-helm-index.sh` daily at 03:00 UTC,
+on a push to `main`, and on demand. On each run it deletes the index, packages
+every chart again from its repository, and signs each one. A chart's `version`
+and `appVersion` come from `[workspace.package] version` in that repository's
+`Cargo.toml`. A repository with no workspace version uses the `Chart.yaml`
+version.
 
 ## Verifying charts
 
-Every published chart tarball is signed and carries supply-chain provenance.
-The chart signing **public key is in this directory** as
-[`krabka-charts.pub.asc`](krabka-charts.pub.asc). It holds one key, so a key
-rotation does not break verification of an older chart. A mirror of the file is
-at `https://krabka-io.github.io/charts/krabka-charts.pub.asc`.
+Each chart carries a Helm PGP provenance file, `<chart>.tgz.prov`. That is the
+only signature. No chart has a cosign signature or an SLSA attestation.
 
-### PGP provenance (`helm install --verify`)
+The public key is [`krabka-charts.pub.asc`](krabka-charts.pub.asc) in this
+directory. Check its fingerprint before you trust it:
+
+```text
+Krabka Charts <charts@krabka.dev>
+74A6 7D5C F9AE 199A 45D2  2E42 594B D543 4544 D339
+```
 
 ```sh
-curl -fsSL https://krabka-io.github.io/charts/krabka-charts.pub.asc \
-  | gpg --dearmor > krabka-keyring.gpg
+curl -fsSLO https://raw.githubusercontent.com/krabka-io/tooling/main/charts/krabka-charts.pub.asc
+gpg --import krabka-charts.pub.asc
+gpg --fingerprint charts@krabka.dev
+gpg --dearmor < krabka-charts.pub.asc > krabka-keyring.gpg
 helm install my-op krabka/krabka-operator --verify --keyring ./krabka-keyring.gpg
-```
-
-### Keyless cosign signature
-
-Each tarball has a detached Sigstore bundle `<chart>.tgz.cosign.bundle` next to
-it in the index. The certificate identity names the repository that released
-the chart:
-
-```sh
-cosign verify-blob \
-  --bundle krabka-operator-<version>.tgz.cosign.bundle \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity-regexp '^https://github.com/krabka-io/krabka-operator/' \
-  krabka-operator-<version>.tgz
-```
-
-### SLSA build provenance attestation
-
-```sh
-gh attestation verify krabka-operator-<version>.tgz --repo krabka-io/krabka-operator
 ```
 
 ## Maintainers: signing keys
 
-The release workflow of each component repository does the signing:
+The `helm-index` workflow in krabka-io.github.io signs every chart. It reads
+three organization Actions secrets in `krabka-io`. They are visible only to
+that repository:
 
-- **cosign** and the **SLSA attestation** are keyless, through Sigstore OIDC.
-  They need no secret, and they run on every non-pull-request build.
-- **PGP `.prov`** activates when the repository has the `HELM_GPG_KEY`,
-  `HELM_GPG_KEY_ID` and `HELM_GPG_PASSPHRASE` secrets. `HELM_GPG_KEY` is the
-  base64 ASCII-armored private key. Set the three secrets in each repository
-  that publishes a chart, from the same key.
+| Secret | Value |
+| ------ | ----- |
+| `HELM_GPG_KEY` | The ASCII-armored private key, base64-encoded |
+| `HELM_GPG_KEY_ID` | Part of the key's user ID, for example `charts@krabka.dev` |
+| `HELM_GPG_PASSPHRASE` | Unset for this key |
 
-The matching public key is [`krabka-charts.pub.asc`](krabka-charts.pub.asc).
-Rotate the private key and this file together: append the new public key here,
-then update the secrets. Keep the private key and its revocation certificate in
-a secrets manager.
+`HELM_GPG_KEY_ID` must match the key's user ID. Helm finds the key by its
+identity, and a fingerprint does not match.
 
-The key is `Krabka Charts <charts@krabka.dev>`, RSA 4096, fingerprint
-`74A6 7D5C F9AE 199A 45D2  2E42 594B D543 4544 D339`. It expires on
-2028-09-11.
+The current key has no passphrase, so leave `HELM_GPG_PASSPHRASE` unset. Do not
+set it to an empty string. The script passes a passphrase file only when the
+secret has a value, and Helm fails with `Error: EOF` on an empty passphrase
+file. If you give the key a passphrase, set this secret to it.
+
+When `HELM_GPG_KEY` is unset, the job publishes charts with no `.prov` file.
+
+To rotate the key, replace `krabka-charts.pub.asc` here and update the two
+secrets. The next index run signs every chart again with the new key. Keep the
+private key and its revocation certificate in a secrets manager.
+
+The key is RSA 4096 and expires on 2028-09-11.
 
 ### The old Crabka key is revoked
 
 Charts signed before 2026-09-12 used a different key, with the user ID
 `Crabka Charts <charts@crabka.dev>`. That key is no longer valid and this
-repository no longer carries it. **Signatures made with it do not verify.**
+repository no longer carries it. Signatures made with it do not verify.
 
 Krabka is undeployed, so no released artifact depends on the old signatures. Do
 not re-add the old public key to make an old `.prov` file verify. Sign the chart
 again with the current key instead.
-
-The new key has no passphrase, so `HELM_GPG_PASSPHRASE` is an empty string.
-Set a passphrase on the private key if you prefer, and update that secret to
-match.
