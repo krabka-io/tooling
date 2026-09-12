@@ -75,7 +75,7 @@ jobs:
           status = 0
           for path in sorted(pathlib.Path("packaging").rglob("*.yaml")):
               try:
-                  # melange expands `${{targets.destdir}}` itself, and that is
+                  # A melange recipe holds its own placeholders, and those are
                   # plain text to a YAML parser, so no pre-pass is needed.
                   yaml.safe_load(path.read_text())
               except yaml.YAMLError as error:
