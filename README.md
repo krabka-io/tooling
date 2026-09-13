@@ -29,7 +29,6 @@ want to check.
 | ------ | ------------ | ----------- |
 | [`scripts/html-root-url.sh`](scripts/html-root-url.sh) | Checks that every crate's `html_root_url` names the workspace version, and can fix them | Every repository that publishes crates |
 | [`scripts/audit-runtime-values.sh`](scripts/audit-runtime-values.sh) | Lists the hardcoded constants, timeouts and capacities that a configuration audit reviews | `krabka-broker`, and any repository running the same audit |
-| [`scripts/test-doc-examples.sh`](scripts/test-doc-examples.sh) | Builds and runs the documented streams examples, then guards against snippet drift | `krabka-streams-rs` |
 
 `scripts/html-root-url.sh` also runs from the shared CI workflow. See
 [`release/README.md`](release/README.md).
