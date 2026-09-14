@@ -15,7 +15,7 @@ no toolchain file. Nothing here is built.
 | Directory | What is in it | Who uses it |
 | --------- | ------------- | ----------- |
 | [`release/`](release/README.md) | Publish gate, version bumper, crates.io bootstrap, and the release-plz templates | Every krabka-io Rust repository |
-| [`packaging/`](packaging/README.md) | melange package recipes and apko image configs | The repositories that ship a container image |
+| [`packaging/`](packaging/README.md) | The Creusot verifier toolchain recipe and a local-binary Dockerfile | krabka-broker, local runs |
 | [`scripts/`](scripts/) | Repository-agnostic check scripts | Named per script below |
 | [`charts/`](charts/README.md) | The Helm chart signing public key | `krabka-operator`, `krabka-rebalancer`, `krabka-schema-registry` |
 
