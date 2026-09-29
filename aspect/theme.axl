@@ -79,10 +79,10 @@ _THEME_VARIABLES = """
 --copy-path-img-hover-filter:invert(85%);
 --code-example-button-color:#94a3b8;
 --code-example-button-hover-color:#e5e7eb;
---codeblock-error-hover-color:rgb(255,0,0);
---codeblock-error-color:rgba(255,0,0,.5);
---codeblock-ignore-hover-color:rgb(255,142,0);
---codeblock-ignore-color:rgba(255,142,0,.6);
+--codeblock-error-hover-color:#ffb4ab;
+--codeblock-error-color:#ff8a80;
+--codeblock-ignore-hover-color:#ffd08a;
+--codeblock-ignore-color:#ffb454;
 --warning-border-color:#ff8e00;
 --type-link-color:#ffb39e;
 --trait-link-color:#93c5fd;
