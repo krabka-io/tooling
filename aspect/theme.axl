@@ -1,0 +1,288 @@
+"""The Krabka look for the pages `rustdoc-site` publishes.
+
+Every value here is a pure function or a constant, so the unit tests compare
+whole results. The palette is the one krabka.io uses: a dark navy page, a
+vermilion accent, Inter for text and JetBrains Mono for code.
+"""
+
+_FONTS_URL = "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
+
+# `apply_rustdoc_theme` writes this comment before the override. A second call
+# finds the comment and knows that the theme is already in place.
+_MARKER = "/* krabka-theme */"
+
+_LOGO_SVG = """<svg viewBox="0 0 90 90" width="100%" height="100%" fill="none" xmlns="http://www.w3.org/2000/svg"><g transform="matrix(1.2410837,0,0,1.2410837,-10.847205,1.7895666)"><ellipse style="fill:none;stroke:#FF4D2E;stroke-width:7.6591;stroke-dasharray:none" cx="45" cy="45" rx="13.749256" ry="8.6910944"/><g><circle style="fill:none;stroke:#FF4D2E;stroke-width:5.01105;stroke-dasharray:none" cx="31.509378" cy="21.770279" r="7.1520071"/><path style="fill:none;stroke:#FF4D2E;stroke-width:5.01105;stroke-dasharray:none" d="m -37.432668,-19.054935 a 7.1520071,7.1520071 0 0 1 -4.415052,6.607593 7.1520071,7.1520071 0 0 1 -7.794188,-1.550361 7.1520071,7.1520071 0 0 1 -1.55036,-7.794187 7.1520071,7.1520071 0 0 1 6.607593,-4.415053" transform="rotate(-135)"/><rect style="fill:#FF4D2E;stroke:none;stroke-width:5.29167;stroke-dasharray:none" width="4.4989443" height="12.777002" x="14.19296" y="41.136307" transform="rotate(-30)"/></g><g transform="matrix(-1,0,0,1,89.997483,0)"><circle style="fill:none;stroke:#FF4D2E;stroke-width:5.01105;stroke-dasharray:none" cx="31.509378" cy="21.770279" r="7.1520071"/><path style="fill:none;stroke:#FF4D2E;stroke-width:5.01105;stroke-dasharray:none" d="m -37.432668,-19.054935 a 7.1520071,7.1520071 0 0 1 -4.415052,6.607593 7.1520071,7.1520071 0 0 1 -7.794188,-1.550361 7.1520071,7.1520071 0 0 1 -1.55036,-7.794187 7.1520071,7.1520071 0 0 1 6.607593,-4.415053" transform="rotate(-135)"/><rect style="fill:#FF4D2E;stroke:none;stroke-width:5.29167;stroke-dasharray:none" width="4.4989443" height="12.777002" x="14.19296" y="41.136307" transform="rotate(-30)"/></g></g></svg>"""
+
+_LANDING_CSS = """
+:root{color-scheme:dark}
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;min-height:100vh;color:#e5e7eb;font:400 16px/1.6 Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background-color:#080d1a;background-image:radial-gradient(ellipse 80% 50% at 50% -20%,rgba(30,58,138,.22),transparent 70%),radial-gradient(ellipse 60% 40% at 100% 30%,rgba(15,23,42,.4),transparent 60%);background-attachment:fixed}
+a{color:#ff8466;text-decoration:none}
+a:hover,a:focus-visible{color:#ffb39e;text-decoration:underline}
+a:focus-visible{outline:2px solid #ff4d2e;outline-offset:2px;border-radius:4px}
+code{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.92em;font-weight:500}
+main,.site-header,.site-footer{width:100%;max-width:60rem;margin:0 auto;padding-left:1rem;padding-right:1rem}
+.site-header{display:flex;align-items:center;gap:1rem;padding-top:3rem;padding-bottom:.5rem}
+.site-header .logo{display:block;flex:none;width:3rem;height:3rem}
+.site-header .logo svg{display:block;width:100%;height:100%}
+h1{margin:0;color:#f3f4f6;font-size:clamp(1.6rem,4vw,2.25rem);font-weight:700;letter-spacing:-.02em;line-height:1.2;overflow-wrap:anywhere}
+.intro{margin:1rem 0 2rem;color:#9ca3af}
+.intro a{color:#ff8466}
+table.crates{width:100%;border-collapse:separate;border-spacing:0;overflow:hidden;background:rgba(15,23,42,.72);border:1px solid rgba(255,255,255,.08);border-radius:.75rem}
+table.crates th,table.crates td{padding:.85rem 1rem;text-align:left;vertical-align:top;border-bottom:1px solid rgba(255,255,255,.08)}
+table.crates tbody tr:last-child td{border-bottom:0}
+table.crates th{color:#9ca3af;font-size:.78rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;background:rgba(12,19,34,.9)}
+table.crates td{color:#9ca3af}
+table.crates td:first-child{white-space:nowrap}
+table.crates tbody tr:hover{background:rgba(255,77,46,.06)}
+table.crates td a code{color:#ff8466}
+table.crates td a:hover code{color:#ffb39e}
+.site-footer{padding-top:2rem;padding-bottom:3rem;color:#9ca3af;font-size:.9rem}
+.site-footer p{margin:.25rem 0}
+main.redirect{padding-top:4rem;padding-bottom:4rem}
+main.redirect p{margin:0;color:#9ca3af}
+@media (max-width:40rem){table.crates th,table.crates td{padding:.7rem .75rem}table.crates td:first-child{white-space:normal;overflow-wrap:anywhere}.site-header{padding-top:2rem}}
+"""
+
+_THEME_SELECTORS = ':root[data-theme="light"],:root:not([data-theme]),:root[data-theme="dark"],:root[data-theme="ayu"]'
+
+# One palette for rustdoc's three themes. It defines every custom property in
+# rustdoc's dark block, so no property keeps a light-theme value.
+_THEME_VARIABLES = """
+--font-family:Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+--font-family-code:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+--main-background-color:#080d1a;
+--main-color:#e5e7eb;
+--settings-input-color:#ff4d2e;
+--settings-input-border-color:#64748b;
+--settings-button-color:#e5e7eb;
+--settings-button-border-focus:#ff4d2e;
+--sidebar-background-color:#0c1322;
+--sidebar-background-color-hover:#1e293b;
+--sidebar-border-color:rgba(255,255,255,.1);
+--code-block-background-color:#0f172a;
+--scrollbar-track-background-color:#080d1a;
+--scrollbar-thumb-background-color:#1e293b;
+--scrollbar-color:#1e293b #080d1a;
+--headings-border-bottom-color:rgba(255,255,255,.12);
+--border-color:rgba(255,255,255,.12);
+--button-background-color:#1e293b;
+--right-side-color:#9ca3af;
+--code-attribute-color:#9ca3af;
+--toggles-color:#9ca3af;
+--toggle-filter:invert(100%);
+--mobile-sidebar-menu-filter:invert(100%);
+--search-input-focused-border-color:#ff4d2e;
+--copy-path-button-color:#9ca3af;
+--copy-path-img-filter:invert(60%);
+--copy-path-img-hover-filter:invert(85%);
+--code-example-button-color:#94a3b8;
+--code-example-button-hover-color:#e5e7eb;
+--codeblock-error-hover-color:rgb(255,0,0);
+--codeblock-error-color:rgba(255,0,0,.5);
+--codeblock-ignore-hover-color:rgb(255,142,0);
+--codeblock-ignore-color:rgba(255,142,0,.6);
+--warning-border-color:#ff8e00;
+--type-link-color:#ffb39e;
+--trait-link-color:#93c5fd;
+--assoc-item-link-color:#ff8466;
+--function-link-color:#fdba74;
+--macro-link-color:#86efac;
+--keyword-link-color:#ff8466;
+--attribute-link-color:#ff8466;
+--mod-link-color:#ff8466;
+--link-color:#ff8466;
+--sidebar-link-color:#ff8466;
+--sidebar-current-link-background-color:rgba(255,77,46,.14);
+--search-result-link-focus-background-color:#1e293b;
+--search-result-border-color:rgba(255,255,255,.12);
+--search-color:#e5e7eb;
+--search-error-code-background-color:#1e293b;
+--search-results-alias-color:#f3f4f6;
+--search-results-grey-color:#9ca3af;
+--search-tab-title-count-color:#9ca3af;
+--search-tab-button-not-selected-border-top-color:#0c1322;
+--search-tab-button-not-selected-background:#0c1322;
+--search-tab-button-selected-border-top-color:#ff4d2e;
+--search-tab-button-selected-background:#080d1a;
+--settings-menu-filter:invert(60%);
+--settings-menu-hover-filter:invert(85%);
+--stab-background-color:rgba(255,77,46,.16);
+--stab-code-color:#ffd4c7;
+--code-highlight-kw-color:#ff8466;
+--code-highlight-kw-2-color:#93c5fd;
+--code-highlight-lifetime-color:#fdba74;
+--code-highlight-prelude-color:#93c5fd;
+--code-highlight-prelude-val-color:#ffb39e;
+--code-highlight-number-color:#86efac;
+--code-highlight-string-color:#86efac;
+--code-highlight-literal-color:#ffb39e;
+--code-highlight-attribute-color:#9ca3af;
+--code-highlight-self-color:#ffb39e;
+--code-highlight-macro-color:#c4b5fd;
+--code-highlight-question-mark-color:#fdba74;
+--code-highlight-comment-color:#7b8798;
+--code-highlight-doc-comment-color:#9ca3af;
+--src-line-numbers-span-color:#ff8466;
+--src-line-number-highlighted-background-color:rgba(255,77,46,.14);
+--target-background-color:rgba(255,77,46,.10);
+--target-border-color:#ff4d2e;
+--kbd-color:#e5e7eb;
+--kbd-background:#1e293b;
+--kbd-box-shadow-color:#334155;
+--rust-logo-filter:drop-shadow(1px 0 0px #fff) drop-shadow(0 1px 0 #fff) drop-shadow(-1px 0 0 #fff) drop-shadow(0 -1px 0 #fff);
+--crate-search-div-filter:invert(94%) sepia(0%) saturate(721%) hue-rotate(255deg) brightness(90%) contrast(90%);
+--crate-search-div-hover-filter:invert(69%) sepia(60%) saturate(6613%) hue-rotate(184deg) brightness(100%) contrast(91%);
+--crate-search-hover-border:#ff4d2e;
+--src-sidebar-background-selected:#1e293b;
+--src-sidebar-background-hover:#172033;
+--table-alt-row-background-color:#0c1322;
+--codeblock-link-background:#1e293b;
+--scrape-example-toggle-line-background:#64748b;
+--scrape-example-toggle-line-hover-background:#94a3b8;
+--scrape-example-code-line-highlight:rgba(255,77,46,.18);
+--scrape-example-code-line-highlight-focus:rgba(255,77,46,.3);
+--scrape-example-help-border-color:#64748b;
+--scrape-example-help-color:#e5e7eb;
+--scrape-example-help-hover-border-color:#ff8466;
+--scrape-example-help-hover-color:#fff;
+--scrape-example-code-wrapper-background-start:rgba(8,13,26,1);
+--scrape-example-code-wrapper-background-end:rgba(8,13,26,0);
+--sidebar-resizer-hover:#ff8466;
+--sidebar-resizer-active:#ff4d2e;
+"""
+
+# The rules below use `:root[data-theme]` or `body.rustdoc` as a prefix. Their
+# specificity equals or exceeds the rules they replace, and they come last.
+_THEME_RULES = """
+body.rustdoc{color-scheme:dark;background-color:#080d1a;background-image:radial-gradient(ellipse 80% 50% at 50% -20%,rgba(30,58,138,.22),transparent 70%),radial-gradient(ellipse 60% 40% at 100% 30%,rgba(15,23,42,.4),transparent 60%);background-attachment:fixed}
+body.rustdoc #crate-search,body.rustdoc h1,body.rustdoc h2,body.rustdoc h3,body.rustdoc h4,body.rustdoc h5,body.rustdoc h6,body.rustdoc .sidebar,body.rustdoc rustdoc-topbar,body.rustdoc .search-input,body.rustdoc .search-results .result-name,body.rustdoc .item-table dt>a,body.rustdoc .out-of-band,body.rustdoc .sub-heading,body.rustdoc span.since,body.rustdoc a.src,body.rustdoc rustdoc-toolbar,body.rustdoc summary.hideme,body.rustdoc .scraped-example-list,body.rustdoc .rustdoc-breadcrumbs,body.rustdoc .search-switcher,body.rustdoc ul.all-items{font-family:var(--font-family)}
+body.rustdoc kbd{font-family:var(--font-family-code)}
+body.rustdoc details.toggle:not([open])>summary .docblock>:first-child::after{font-family:var(--font-family)}
+body.rustdoc h1,body.rustdoc h2,body.rustdoc h3,body.rustdoc h4{font-weight:600;letter-spacing:-.01em}
+body.rustdoc code,body.rustdoc pre,body.rustdoc .code-header,body.rustdoc .type-signature{font-family:var(--font-family-code)}
+body.rustdoc .docblock code,body.rustdoc .item-info code,body.rustdoc .item-table dd code{font-size:.88em}
+:root[data-theme] h1,:root[data-theme] h2,:root[data-theme] h3,:root[data-theme] h4,:root[data-theme] h1 a,:root[data-theme] .sidebar h2 a,:root[data-theme] .sidebar h3 a{color:#f3f4f6}
+:root[data-theme] .docblock code{color:#ffd4c7}
+:root[data-theme] .docblock a>code{color:#ff8466 !important}
+:root[data-theme] .code-header,:root[data-theme] .docblock pre>code,:root[data-theme] pre,:root[data-theme] pre>code,:root[data-theme] .item-info code,:root[data-theme] .rustdoc.source .example-wrap{color:#e5e7eb}
+:root[data-theme] .sidebar .current,:root[data-theme] .sidebar .current a,:root[data-theme] .sidebar a:hover,:root[data-theme] #src-sidebar div.files>a:hover,:root[data-theme] details.dir-entry summary:hover,:root[data-theme] #src-sidebar div.files>a:focus,:root[data-theme] details.dir-entry summary:focus,:root[data-theme] #src-sidebar div.files>a.selected{color:#ffb39e}
+:root[data-theme] .sidebar-elems .location{color:#ff8466}
+:root[data-theme] a[data-nosnippet].line-highlighted{color:#ff8466;padding-right:7px;border-right:1px solid #ff4d2e}
+:root[data-theme] .search-results a:hover,:root[data-theme] .search-results a:focus{color:#f3f4f6 !important;background-color:#1e293b}
+:root[data-theme] .search-results a{color:#ff8466}
+:root[data-theme] .search-results a div.desc{color:#9ca3af}
+:root[data-theme] .result-name .primitive>i,:root[data-theme] .result-name .keyword>i{color:#9ca3af}
+:root[data-theme] #search-tabs>button.selected{border-bottom:1px solid #ff4d2e !important;border-top:none}
+:root[data-theme] #search-tabs>button:not(.selected){border:none;background-color:transparent !important}
+:root[data-theme] #search-tabs>button:hover{border-bottom:1px solid rgba(255,77,46,.4)}
+:root[data-theme] .settings-menu>a img,:root[data-theme] #sidebar-button>a::before{filter:invert(100)}
+body.rustdoc a:focus-visible{outline:2px solid #ff4d2e;outline-offset:2px}
+"""
+
+def landing_style():
+    """The CSS of the landing page and of the per-crate redirect pages.
+
+    The page is self-contained: it links only the Google fonts, and the font
+    stack falls back to system fonts when they fail to load. The look is dark
+    on every browser setting, because it does not read `prefers-color-scheme`.
+
+    The page builder must produce this structure, and no other class name is
+    styled:
+
+        <body>
+        <header class="site-header">
+          <span class="logo">{krabka_logo_svg()}</span>
+          <h1>{repository} API documentation</h1>
+        </header>
+        <main>
+          <p class="intro">Text with optional <a href="...">links</a>.</p>
+          <table class="crates">
+            <thead><tr><th>Crate</th><th>What it is</th></tr></thead>
+            <tbody>
+              <tr><td><a href="..."><code>crate-name</code></a></td><td>Description</td></tr>
+            </tbody>
+          </table>
+        </main>
+        <footer class="site-footer">
+          <p><a href="https://krabka.io/api">Krabka API reference</a></p>
+          <p><a href="https://github.com/org/repo">org/repo on GitHub</a></p>
+        </footer>
+        </body>
+
+    A redirect page uses `<main class="redirect"><p><a href="...">name</a></p></main>`
+    in place of the `main` above. It can keep the `site-header` before it.
+
+    The document needs `<meta name="viewport" content="width=device-width, initial-scale=1">`
+    and a `<link rel="stylesheet" href="FONTS_URL">` for the fonts: `fonts_url()`
+    returns that address.
+
+    Returns:
+        The CSS text, without a `style` element around it.
+    """
+    return _LANDING_CSS.strip() + "\n"
+
+def fonts_url():
+    """The Google Fonts stylesheet address for Inter and JetBrains Mono."""
+    return _FONTS_URL
+
+def krabka_logo_svg():
+    """The Krabka logo as one `svg` element.
+
+    It is the favicon of krabka.io. The element has `viewBox="0 0 90 90"` and
+    a width and height of 100%, so the size of its container sets its size.
+    """
+    return _LOGO_SVG
+
+def rustdoc_theme_css():
+    """The override stylesheet that gives rustdoc pages the Krabka look.
+
+    One dark palette replaces the light, dark and ayu themes, so the theme
+    picker of rustdoc cannot produce a page that clashes with the site. The
+    text contains no `<` character.
+    """
+    return (
+        _THEME_SELECTORS + "{" + "".join(_THEME_VARIABLES.split("\n")) + "}\n" +
+        _THEME_RULES.strip() + "\n"
+    )
+
+def apply_rustdoc_theme(css_text):
+    """The rustdoc stylesheet `css_text` with the Krabka theme added.
+
+    The result starts with the font `@import`, because CSS accepts an
+    `@import` only at the start of a stylesheet. It continues with `css_text`
+    unchanged, then a marker comment, then `rustdoc_theme_css()`. A stylesheet
+    that already holds the marker comes back unchanged.
+
+    Args:
+        css_text: The text of a `rustdoc-<hash>.css` file.
+    """
+    if css_text.find(_MARKER) >= 0:
+        return css_text
+    return (
+        '@import url("' + _FONTS_URL + '");\n' +
+        css_text + "\n" +
+        _MARKER + "\n" +
+        rustdoc_theme_css()
+    )
+
+def _is_hashed_file(file_name, prefix, suffix):
+    """Whether `file_name` is `<prefix><hex hash><suffix>`."""
+    if not file_name.startswith(prefix) or not file_name.endswith(suffix):
+        return False
+    hash = file_name[len(prefix):len(file_name) - len(suffix)]
+    if not hash:
+        return False
+    for character in hash.elems():
+        if character not in "0123456789abcdef":
+            return False
+    return True
+
+def is_rustdoc_stylesheet(file_name):
+    """Whether `file_name` is rustdoc's main stylesheet, `rustdoc-<hash>.css`."""
+    return _is_hashed_file(file_name, "rustdoc-", ".css")
+
+def is_favicon_svg(file_name):
+    """Whether `file_name` is the rustdoc favicon, `favicon-<hash>.svg`."""
+    return _is_hashed_file(file_name, "favicon-", ".svg")

@@ -1,0 +1,293 @@
+"""Unit tests for `theme.axl`."""
+
+load(
+    "./theme.axl",
+    "apply_rustdoc_theme",
+    "fonts_url",
+    "is_favicon_svg",
+    "is_rustdoc_stylesheet",
+    "krabka_logo_svg",
+    "landing_style",
+    "rustdoc_theme_css",
+)
+load("./testing.axl", "check", "check_eq", "suite", "suite_task")
+
+_MARKER = "/* krabka-theme */"
+
+# Every custom property in the dark block of rustdoc 1.94, in file order. The
+# override has to define each one, or that property keeps a light value under
+# one of the three theme names.
+_RUSTDOC_VARIABLES = [
+    "--main-background-color",
+    "--main-color",
+    "--settings-input-color",
+    "--settings-input-border-color",
+    "--settings-button-color",
+    "--settings-button-border-focus",
+    "--sidebar-background-color",
+    "--sidebar-background-color-hover",
+    "--sidebar-border-color",
+    "--code-block-background-color",
+    "--scrollbar-track-background-color",
+    "--scrollbar-thumb-background-color",
+    "--scrollbar-color",
+    "--headings-border-bottom-color",
+    "--border-color",
+    "--button-background-color",
+    "--right-side-color",
+    "--code-attribute-color",
+    "--toggles-color",
+    "--toggle-filter",
+    "--mobile-sidebar-menu-filter",
+    "--search-input-focused-border-color",
+    "--copy-path-button-color",
+    "--copy-path-img-filter",
+    "--copy-path-img-hover-filter",
+    "--code-example-button-color",
+    "--code-example-button-hover-color",
+    "--codeblock-error-hover-color",
+    "--codeblock-error-color",
+    "--codeblock-ignore-hover-color",
+    "--codeblock-ignore-color",
+    "--warning-border-color",
+    "--type-link-color",
+    "--trait-link-color",
+    "--assoc-item-link-color",
+    "--function-link-color",
+    "--macro-link-color",
+    "--keyword-link-color",
+    "--attribute-link-color",
+    "--mod-link-color",
+    "--link-color",
+    "--sidebar-link-color",
+    "--sidebar-current-link-background-color",
+    "--search-result-link-focus-background-color",
+    "--search-result-border-color",
+    "--search-color",
+    "--search-error-code-background-color",
+    "--search-results-alias-color",
+    "--search-results-grey-color",
+    "--search-tab-title-count-color",
+    "--search-tab-button-not-selected-border-top-color",
+    "--search-tab-button-not-selected-background",
+    "--search-tab-button-selected-border-top-color",
+    "--search-tab-button-selected-background",
+    "--settings-menu-filter",
+    "--settings-menu-hover-filter",
+    "--stab-background-color",
+    "--stab-code-color",
+    "--code-highlight-kw-color",
+    "--code-highlight-kw-2-color",
+    "--code-highlight-lifetime-color",
+    "--code-highlight-prelude-color",
+    "--code-highlight-prelude-val-color",
+    "--code-highlight-number-color",
+    "--code-highlight-string-color",
+    "--code-highlight-literal-color",
+    "--code-highlight-attribute-color",
+    "--code-highlight-self-color",
+    "--code-highlight-macro-color",
+    "--code-highlight-question-mark-color",
+    "--code-highlight-comment-color",
+    "--code-highlight-doc-comment-color",
+    "--src-line-numbers-span-color",
+    "--src-line-number-highlighted-background-color",
+    "--target-background-color",
+    "--target-border-color",
+    "--kbd-color",
+    "--kbd-background",
+    "--kbd-box-shadow-color",
+    "--rust-logo-filter",
+    "--crate-search-div-filter",
+    "--crate-search-div-hover-filter",
+    "--crate-search-hover-border",
+    "--src-sidebar-background-selected",
+    "--src-sidebar-background-hover",
+    "--table-alt-row-background-color",
+    "--codeblock-link-background",
+    "--scrape-example-toggle-line-background",
+    "--scrape-example-toggle-line-hover-background",
+    "--scrape-example-code-line-highlight",
+    "--scrape-example-code-line-highlight-focus",
+    "--scrape-example-help-border-color",
+    "--scrape-example-help-color",
+    "--scrape-example-help-hover-border-color",
+    "--scrape-example-help-hover-color",
+    "--scrape-example-code-wrapper-background-start",
+    "--scrape-example-code-wrapper-background-end",
+    "--sidebar-resizer-hover",
+    "--sidebar-resizer-active",
+]
+
+# The two properties that the override adds to switch the fonts.
+_FONT_VARIABLES = ["--font-family", "--font-family-code"]
+
+_STYLESHEET_NAMES = [
+    ("rustdoc-77263533.css", True),
+    ("rustdoc-0a1b2c3d.css", True),
+    ("rustdoc-77263533.css.map", False),
+    ("rustdoc-x.css", False),
+    ("rustdoc-.css", False),
+    ("rustdoc.css", False),
+    ("normalize-9960930a.css", False),
+    ("noscript-ffcac47a.css", False),
+    ("main-7bab91a1.js", False),
+    ("favicon-044be391.svg", False),
+    ("favicon-32x32-eab170b8.png", False),
+    ("README", False),
+    ("", False),
+]
+
+_FAVICON_NAMES = [
+    ("favicon-044be391.svg", True),
+    ("favicon-ffffffff.svg", True),
+    ("favicon-044be391.svg.map", False),
+    ("favicon-.svg", False),
+    ("favicon-x.svg", False),
+    ("favicon-32x32-eab170b8.png", False),
+    ("favicon.svg", False),
+    ("rust-logo-9a9549ea.svg", False),
+    ("rustdoc-77263533.css", False),
+    ("README", False),
+    ("", False),
+]
+
+_ORIGINALS = [
+    "",
+    "body{color:#000}",
+    ":root[data-theme=\"dark\"]{--main-color:#ddd;}\n",
+]
+
+def _tag_problem(svg):
+    """The first structure problem of an `svg` element, or "" for none."""
+    stack = []
+    rest = svg
+    for _ in range(len(svg)):
+        start = rest.find("<")
+        if start < 0:
+            break
+        end = rest.find(">", start)
+        if end < 0:
+            return "tag without >"
+        tag = rest[start + 1:end]
+        rest = rest[end + 1:]
+        if tag.startswith("/"):
+            if not stack or stack[-1] != tag[1:]:
+                return "unbalanced close tag " + tag
+            stack.pop()
+        elif tag.endswith("/"):
+            continue
+        else:
+            stack.append(tag.split(" ")[0])
+    if stack:
+        return "unclosed tags %r" % stack
+    return ""
+
+def _first_block_names(css):
+    """The custom property names of the first `{...}` block of `css`."""
+    body = css[css.find("{") + 1:css.find("}")]
+    names = []
+    for declaration in body.split(";"):
+        if declaration.strip():
+            names.append(declaration.split(":")[0].strip())
+    return names
+
+def _test_is_rustdoc_stylesheet(ctx):
+    for file_name, want in _STYLESHEET_NAMES:
+        check_eq("is_rustdoc_stylesheet(%r)" % file_name, is_rustdoc_stylesheet(file_name), want)
+
+def _test_is_favicon_svg(ctx):
+    for file_name, want in _FAVICON_NAMES:
+        check_eq("is_favicon_svg(%r)" % file_name, is_favicon_svg(file_name), want)
+
+def _test_apply_rustdoc_theme_wraps_the_original(ctx):
+    for original in _ORIGINALS:
+        got = apply_rustdoc_theme(original)
+        check("starts with the font import: %r" % got[:40], got.startswith("@import url("))
+        head, marker, tail = got.partition(_MARKER)
+        import_line, _, kept = head.partition("\n")
+        check_eq("import line", import_line, '@import url("%s");' % fonts_url())
+        check_eq("original between import and marker", kept, original + "\n")
+        check_eq("marker", marker, _MARKER)
+        check_eq("override at the end", tail, "\n" + rustdoc_theme_css())
+
+def _test_apply_rustdoc_theme_is_idempotent(ctx):
+    for original in _ORIGINALS:
+        once = apply_rustdoc_theme(original)
+        check_eq("second call", apply_rustdoc_theme(once), once)
+        check_eq("marker written once", len(once.split(_MARKER)), 2)
+
+def _test_theme_defines_every_rustdoc_variable(ctx):
+    defined = _first_block_names(rustdoc_theme_css())
+    check_eq("count", len(_RUSTDOC_VARIABLES), 99)
+    check_eq("no variable defined twice", len(defined), len(set(defined)))
+    check_eq("defined names", sorted(defined), sorted(_RUSTDOC_VARIABLES + _FONT_VARIABLES))
+
+def _test_theme_covers_every_rustdoc_theme_name(ctx):
+    css = rustdoc_theme_css()
+    selectors = css[:css.find("{")].split(",")
+    check_eq(
+        "selector list",
+        selectors,
+        [
+            ':root[data-theme="light"]',
+            ":root:not([data-theme])",
+            ':root[data-theme="dark"]',
+            ':root[data-theme="ayu"]',
+        ],
+    )
+
+def _test_style_sheets_cannot_break_out_of_a_style_element(ctx):
+    for label, css in [
+        ("rustdoc_theme_css", rustdoc_theme_css()),
+        ("landing_style", landing_style()),
+        ("apply_rustdoc_theme", apply_rustdoc_theme("")),
+    ]:
+        check_eq("%s has no <" % label, css.find("<"), -1)
+
+def _test_style_sheet_braces_balance(ctx):
+    for label, css in [
+        ("rustdoc_theme_css", rustdoc_theme_css()),
+        ("landing_style", landing_style()),
+    ]:
+        check_eq("%s braces" % label, css.count("{"), css.count("}"))
+        check_eq("%s parentheses" % label, css.count("("), css.count(")"))
+
+def _test_landing_style_keeps_the_dark_page_background(ctx):
+    check(
+        "landing background",
+        "background-color:#080d1a" in landing_style(),
+    )
+    check("landing ends with a newline", landing_style().endswith("\n"))
+
+def _test_fonts_url_names_both_families(ctx):
+    url = fonts_url()
+    check("https", url.startswith("https://fonts.googleapis.com/css2?"))
+    check("Inter", "family=Inter:" in url)
+    check("JetBrains Mono", "family=JetBrains+Mono:" in url)
+
+def _test_krabka_logo_svg_is_one_well_formed_element(ctx):
+    svg = krabka_logo_svg()
+    check("starts with svg", svg.startswith("<svg "))
+    check("ends with svg", svg.endswith("</svg>"))
+    check_eq("one svg element", svg.count("<svg"), 1)
+    check_eq("structure", _tag_problem(svg), "")
+    check("brand colour", "#FF4D2E" in svg)
+    check("no XML declaration", "<?" not in svg)
+    check("no comment", "<!--" not in svg)
+
+theme_tests = suite("theme", [
+    _test_is_rustdoc_stylesheet,
+    _test_is_favicon_svg,
+    _test_apply_rustdoc_theme_wraps_the_original,
+    _test_apply_rustdoc_theme_is_idempotent,
+    _test_theme_defines_every_rustdoc_variable,
+    _test_theme_covers_every_rustdoc_theme_name,
+    _test_style_sheets_cannot_break_out_of_a_style_element,
+    _test_style_sheet_braces_balance,
+    _test_landing_style_keeps_the_dark_page_background,
+    _test_fonts_url_names_both_families,
+    _test_krabka_logo_svg_is_one_well_formed_element,
+])
+
+test_theme = suite_task(theme_tests)
