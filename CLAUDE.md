@@ -9,7 +9,27 @@ There is no `Cargo.toml`, no Bazel workspace and no toolchain file. Do not add
 one. A file that needs to compile belongs in the repository that owns the
 crates it compiles.
 
-Everything here is shell, Python, YAML or TOML.
+Everything here is shell, Python, YAML, TOML or AXL. AXL is the Starlark
+dialect of the Aspect CLI. It has no regular expressions, no `while` and no
+recursion.
+
+## The AXL module
+
+The root `MODULE.aspect` and the files in `aspect/` form an AXL module that
+other krabka-io repositories load with `axl_archive_dep`. Follow these rules:
+
+- The module exports only `rustdoc-site`, through one `use_task` line. Do not
+  export another task. A consumer that defines a task with the same name breaks.
+- The module must hold everything it loads. The Aspect CLI does not resolve
+  dependencies of a module, and a `load` must stay inside the module.
+- `.aspect/` serves this repository only. It holds the `axl-tests` task, which
+  the module does not export.
+- A shared task lives here once. A consumer must not keep its own copy of
+  `rustdoc_site.axl`, `theme.axl`, `testing.axl` or `repo.axl`. Fix the task
+  here and move the consumer to the new revision. See
+  [README.md](README.md) for the steps.
+- Each `.axl` file has a `_test.axl` beside it. Tests compare whole values and
+  never read source files.
 
 ## Compatibility
 

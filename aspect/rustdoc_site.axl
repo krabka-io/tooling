@@ -1,0 +1,608 @@
+"""Assemble the rendered rustdoc set into one static site with a landing page.
+
+`bazel build $(bazel query 'kind("rust_doc rule", //crates/...)')` writes one
+`<lib>_doc.rustdoc` directory per crate under `bazel-bin/crates/<pkg>/`. This
+copies each of them to `<out>/<cargo-name>/`, gives the copy the Krabka theme,
+adds a redirect from that directory to the crate's own `index.html`, and writes
+`<out>/index.html` that lists every crate with its Cargo description. The
+docs-pages workflow uploads `<out>` to GitHub Pages.
+
+    aspect rustdoc-site --output site
+
+The task reads nothing else about the repository it runs in. The landing page
+takes its name from the `repository` URL of the root `Cargo.toml`, or from the
+name of the checkout directory, or from `--repo`.
+"""
+
+load("./repo.axl", "is_file", "read_lines")
+load(
+    "./theme.axl",
+    "apply_rustdoc_theme",
+    "fonts_url",
+    "is_favicon_svg",
+    "is_rustdoc_stylesheet",
+    "krabka_logo_svg",
+    "landing_style",
+)
+
+# The suffix `rules_rust` gives the directory a `rust_doc` rule produces. A
+# `rust_proc_macro` crate goes through the same rule, so it has the same suffix.
+RUSTDOC_SUFFIX = "_doc.rustdoc"
+
+# The GitHub organization that owns every repository this task runs in.
+GITHUB_ORGANIZATION = "krabka-io"
+
+# The page that lists the API documentation of every krabka-io repository.
+API_INDEX_URL = "https://krabka.io/api"
+
+# The forms of a GitHub URL that `repository_name` accepts, up to the
+# organization.
+_GITHUB_URL_PREFIXES = [
+    "https://github.com/",
+    "http://github.com/",
+    "git://github.com/",
+    "ssh://git@github.com/",
+    "git@github.com:",
+]
+
+_SIMPLE_ESCAPES = {
+    '"': '"',
+    "\\": "\\",
+    "n": "\n",
+    "t": "\t",
+    "r": "\r",
+    "b": "\x08",
+    "f": "\x0c",
+}
+
+# The width in hex digits of `\uXXXX` and `\UXXXXXXXX`.
+_UNICODE_ESCAPE_WIDTH = {"u": 4, "U": 8}
+
+_HEX_DIGITS = "0123456789abcdef"
+
+def html_escape(text):
+    """`text` with the characters HTML gives meaning to written as entities.
+
+    `&` goes first so that the entities the later replacements introduce are
+    not escaped a second time.
+    """
+    return (text
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+        .replace("'", "&#39;"))
+
+def _hex_value(digits):
+    """The number the characters `digits` spell in hex, or -1 when one is not a hex digit."""
+    value = 0
+    for digit in digits:
+        place = _HEX_DIGITS.find(digit.lower())
+        if place < 0:
+            return -1
+        value = value * 16 + place
+    return value
+
+def _only_a_comment_follows(rest):
+    """Whether `rest`, the text after a value's closing quote, is blank or a `#` comment."""
+    trimmed = rest.strip()
+    return not trimmed or trimmed.startswith("#")
+
+def _decode_basic(body):
+    """The text of a TOML basic string whose opening quote was already consumed.
+
+    The string ends at the first unescaped quote, after which only a `#`
+    comment may follow. Returns None when the string is unterminated, has other
+    text after the closing quote, or holds an escape TOML does not define
+    (a `\\u` or `\\U` escape that is not a Unicode scalar value included).
+    """
+
+    # The scan works on characters, not bytes, so non-ASCII text passes through.
+    chars = [chr(code) for code in body.codepoints()]
+    decoded = []
+    skip = 0
+
+    # Starlark has no `while`; each iteration consumes at least one character.
+    for index in range(len(chars)):
+        if skip > 0:
+            skip -= 1
+            continue
+        char = chars[index]
+        if char == '"':
+            if not _only_a_comment_follows("".join(chars[index + 1:])):
+                return None
+            return "".join(decoded)
+        if char != "\\":
+            decoded.append(char)
+            continue
+        if index + 1 >= len(chars):
+            return None
+        kind = chars[index + 1]
+        if kind in _SIMPLE_ESCAPES:
+            decoded.append(_SIMPLE_ESCAPES[kind])
+            skip = 1
+        elif kind in _UNICODE_ESCAPE_WIDTH:
+            width = _UNICODE_ESCAPE_WIDTH[kind]
+            digits = chars[index + 2:index + 2 + width]
+            if len(digits) < width:
+                return None
+            code = _hex_value(digits)
+
+            # TOML allows Unicode scalar values only: no surrogates, nothing above U+10FFFF.
+            if code < 0 or code > 0x10FFFF or (code >= 0xD800 and code <= 0xDFFF):
+                return None
+            decoded.append(chr(code))
+            skip = 1 + width
+        else:
+            return None
+    return None
+
+def _decode_literal(body):
+    """The text of a TOML literal string whose opening quote was already consumed.
+
+    A literal string has no escapes, so it ends at the first `'`, after which
+    only a `#` comment may follow. Returns None otherwise.
+    """
+    end = body.find("'")
+    if end < 0 or not _only_a_comment_follows(body[end + 1:]):
+        return None
+    return body[:end]
+
+def _string_value(text):
+    """The TOML string that opens the stripped `text`, or None when it holds none.
+
+    Multi-line strings and values that are not strings read as None.
+    """
+    if text.startswith('"""') or text.startswith("'''"):
+        return None
+    if text.startswith('"'):
+        return _decode_basic(text[1:])
+    if text.startswith("'"):
+        return _decode_literal(text[1:])
+    return None
+
+def _table_name(line):
+    """The name inside the `[name]` header `line`, or "" for an array table or a bad header."""
+    if not line.startswith("[") or line.startswith("[["):
+        return ""
+    end = line.find("]")
+    return line[1:end].strip() if end > 0 else ""
+
+def _table_field(lines, tables, field):
+    """The string `field` is assigned on its first assignment in one of the `tables`.
+
+    Only keys of the named tables are read: the scan skips every other table,
+    so a dependency's `name` never answers for the crate's own. A line may be
+    indented, may leave out the spaces around `=`, and may end in a `#
+    comment`. The value is decoded as TOML: a basic string (`"..."`) has its
+    escapes resolved and a literal string (`'...'`) is taken as written. A key
+    that is absent, is not a one-line string (`field.workspace = true`) or is
+    malformed reads as "".
+    """
+    in_table = False
+    for raw in lines:
+        line = raw.strip()
+        if line.startswith("["):
+            in_table = _table_name(line) in tables
+            continue
+        if not in_table or not line.startswith(field):
+            continue
+        rest = line[len(field):].lstrip()
+        if not rest.startswith("="):
+            continue
+        value = _string_value(rest[1:].lstrip())
+        return value if value != None else ""
+    return ""
+
+def manifest_field(lines, field, table = "package"):
+    """The string `field` is assigned on its first `field = "..."` line of `[table]`.
+
+    `table` is `package` unless the caller names another, such as `lib`. Only
+    that exact table is read: `[lib.foo]` and `[[bin]]` are other tables. The
+    result is plain text; escape it before it goes into HTML. `_table_field`
+    lists what the scan reads and what it skips.
+    """
+    return _table_field(lines, [table], field)
+
+def _github_repository(url):
+    """The repository name in the GitHub `url`, or "" when `url` is not a GitHub one."""
+    for prefix in _GITHUB_URL_PREFIXES:
+        if not url.startswith(prefix):
+            continue
+        parts = url[len(prefix):].split("/")
+        if len(parts) < 2 or not parts[0]:
+            return ""
+        name = parts[1]
+        return name[:-len(".git")] if name.endswith(".git") else name
+    return ""
+
+def repository_name(lines, root):
+    """The name of the repository whose root `Cargo.toml` holds `lines`.
+
+    The name is the last part of the `repository = "https://github.com/<org>/<repo>"`
+    value that `[workspace.package]` or `[package]` sets. When there is no
+    such value, or it does not name a GitHub repository, the name is the last
+    directory of `root`.
+    """
+    name = _github_repository(_table_field(lines, ["workspace.package", "package"], "repository").strip())
+    if name:
+        return name
+    return root.rstrip("/").rsplit("/", 1)[-1] or "repository"
+
+def snake(name):
+    """The Rust module name for the crate Cargo calls `name`."""
+    return name.replace("-", "_")
+
+def module_name(lines):
+    """The directory rustdoc writes the crate's pages to, from the manifest `lines`.
+
+    Rustdoc names it after the library. `[lib] name` sets that name. Without
+    one, the library takes the package name. Hyphens become underscores in
+    both. A `[lib]` name that is missing or not a string falls back to the
+    package name.
+    """
+    return snake(manifest_field(lines, "name", "lib") or manifest_field(lines, "name"))
+
+def find_rustdoc(entries):
+    """The rustdoc directory among a listing's `entries`, or "" when there is none.
+
+    A `rust_doc` rule is named after the library it documents, so which entry
+    it is depends on the crate; the suffix is the only fixed part. The listing
+    is searched in sorted order so that a package with two of them picks the
+    same one on every machine.
+    """
+    for entry in sorted(entries):
+        if entry.endswith(RUSTDOC_SUFFIX):
+            return entry
+    return ""
+
+# The lines that open every generated page, before the page's own head lines.
+_PAGE_HEAD = [
+    "<!doctype html>",
+    '<html lang="en">',
+    '<meta charset="utf-8">',
+    '<meta name="viewport" content="width=device-width, initial-scale=1">',
+]
+
+def _document(head, body):
+    """A page made of the `head` lines, the theme's fonts and style, and the `body` lines."""
+    lines = _PAGE_HEAD + head + [
+        '<link rel="stylesheet" href="%s">' % fonts_url(),
+        "<style>",
+        landing_style(),
+        "</style>",
+        "<body>",
+    ] + body + ["</body>", "</html>"]
+    return "\n".join(lines) + "\n"
+
+def redirect_page(name, module):
+    """The page at `<out>/<name>/index.html`, which forwards to the crate's own.
+
+    `name` and `module` are manifest-derived text and are escaped for the page.
+
+    Rustdoc's output sits one directory further down, under the crate's module
+    name, so without this the crate's directory has no entry point at all.
+    """
+    target = html_escape(module) + "/index.html"
+    return _document(
+        [
+            '<meta http-equiv="refresh" content="0; url=%s">' % target,
+            "<title>%s</title>" % html_escape(name),
+        ],
+        [
+            '<main class="redirect">',
+            '<p><a href="%s">%s</a></p>' % (target, html_escape(name)),
+            "</main>",
+        ],
+    )
+
+def landing_row(row):
+    """The landing page's table row for one `struct(name, snake, description)`.
+
+    The fields are plain manifest text and are escaped here.
+    """
+    return '<tr><td><a href="%s/%s/index.html"><code>%s</code></a></td><td>%s</td></tr>' % (
+        html_escape(row.name),
+        html_escape(row.snake),
+        html_escape(row.name),
+        html_escape(row.description),
+    )
+
+def landing_page(repo, rows):
+    """The site's `index.html` for the repository `repo`, one `struct(name, snake, description)` per row.
+
+    `repo` is the repository name. It and the rows are plain text and are
+    escaped here.
+    """
+    title = "%s API documentation" % html_escape(repo)
+    slug = html_escape(GITHUB_ORGANIZATION + "/" + repo)
+    return _document(
+        ["<title>%s</title>" % title],
+        [
+            '<header class="site-header">',
+            '<span class="logo">%s</span>' % krabka_logo_svg(),
+            "<h1>%s</h1>" % title,
+            "</header>",
+            "<main>",
+            '<p class="intro">Rustdoc for every crate in',
+            '<a href="https://github.com/%s">%s</a>,' % (slug, slug),
+            "rendered from the <code>main</code> branch.</p>",
+            '<table class="crates">',
+            "<thead><tr><th>Crate</th><th>What it is</th></tr></thead>",
+            "<tbody>",
+        ] + [landing_row(row) for row in rows] + [
+            "</tbody>",
+            "</table>",
+            "</main>",
+            '<footer class="site-footer">',
+            '<p><a href="%s">Krabka API reference</a></p>' % API_INDEX_URL,
+            '<p><a href="https://github.com/%s">%s on GitHub</a></p>' % (slug, slug),
+            "</footer>",
+        ],
+    )
+
+def problems(crates):
+    """Every complaint about `crates`, in report order.
+
+    A crate is `struct(package, name, snake, description, rustdoc, has_index)`:
+    its directory under `crates/`, what its manifest calls it, that name as a
+    module, the rustdoc directory found for it under `bazel-bin` (or "" when
+    there is none), and whether that directory holds the crate's own index.
+    """
+    found = []
+    for crate in crates:
+        if not crate.name:
+            found.append("crates/%s/Cargo.toml declares no package name" % crate.package)
+        elif not crate.rustdoc:
+            found.append("no rustdoc output for %s under bazel-bin/crates/%s" % (crate.name, crate.package))
+        elif not crate.has_index:
+            found.append("%s has no %s/index.html" % (crate.rustdoc, crate.snake))
+    return found
+
+def resolve_output(root, output):
+    """`output` as an absolute path, a relative one taken from the repo root."""
+    if output.startswith("/"):
+        return output
+    return root + "/" + output
+
+# The file that marks an output directory as one this task wrote. The task
+# empties only a directory that holds it, so a mistyped `--output` cannot
+# delete a directory of the repository.
+OUTPUT_MARKER = ".rustdoc-site"
+
+def normalize_path(path):
+    """`path`, absolute, with `.` and `..` segments and repeated slashes collapsed.
+
+    A `..` at the filesystem root stays at the root, as it does for the OS.
+    """
+    kept = []
+    for segment in path.split("/"):
+        if segment == "" or segment == ".":
+            continue
+        if segment == "..":
+            if kept:
+                kept.pop()
+            continue
+        kept.append(segment)
+    return "/" + "/".join(kept)
+
+def output_problem(root, out, entries):
+    """Why `out` may not be emptied and rewritten, or "" when it may.
+
+    `entries` lists the names inside `out`, or is None when `out` does not
+    exist. Both paths are normalized first. `out` must lie strictly inside
+    `root`. Then one of three cases holds. A missing directory is fine. An
+    empty one is fine. A non-empty one is fine only when it holds
+    `OUTPUT_MARKER`, which an earlier run wrote. Any other directory is a
+    directory of the repository, and `write_site` would delete it.
+    """
+    normal_root = normalize_path(root)
+    normal_out = normalize_path(out)
+    prefix = normal_root.rstrip("/") + "/"
+    if normal_out == normal_root:
+        return "output directory %s is the repository root" % out
+    if not normal_out.startswith(prefix):
+        return "output directory %s is not inside the repository root %s" % (out, root)
+    if entries and OUTPUT_MARKER not in entries:
+        return "output directory %s exists, is not empty, and has no %s marker from an earlier run; remove it by hand or choose another path" % (out, OUTPUT_MARKER)
+    return ""
+
+def _output_entries(fs, out):
+    """The names inside `out`, or None when it is missing.
+
+    A path that is a file, not a directory, reads as one unnamed entry, so it
+    counts as non-empty and has no marker.
+    """
+    if not fs.exists(out):
+        return None
+    if not fs.metadata(out).is_dir:
+        return [""]
+    return [entry.path for entry in fs.read_dir(out)]
+
+def copy_tree(fs, source, destination):
+    """Copy the tree at `source` to `destination` writable, and count the files.
+
+    Bazel writes its outputs read-only and reaches them through symlinks, which
+    is why the copy follows links and sets modes itself: the redirect page and
+    the theme are written into the copy, so the copy cannot inherit the
+    read-only bit. `repo.axl`'s `walk` will not serve here because it
+    classifies entries from `read_dir` alone, which reports a symlink as
+    neither file nor directory and would therefore drop one silently;
+    `fs.metadata` resolves the link.
+    """
+    copied = 0
+    pending = [""]
+
+    # Starlark has no `while` and forbids recursion, so the frontier is drained
+    # by a bounded sweep whose exhaustion is itself an error.
+    for _ in range(100000):
+        if not pending:
+            break
+        relative = pending.pop()
+        fs.create_dir_all(destination + relative)
+        for entry in fs.read_dir(source + relative):
+            child = relative + "/" + entry.path
+            metadata = fs.metadata(source + child)
+            if metadata.is_dir:
+                pending.append(child)
+            else:
+                fs.copy(source + child, destination + child)
+                fs.set_permissions(destination + child, 0o755 if metadata.executable else 0o644)
+                copied += 1
+    if pending:
+        fail("copy_tree: %s holds more directories than this sweep can reach" % source)
+    return copied
+
+def theme_action(file_name):
+    """What the theme does to the `static.files` entry `file_name`: "css", "favicon" or "".
+
+    Only the main rustdoc stylesheet and the favicon change. Every other file
+    stays as rustdoc wrote it, and so does every HTML page.
+    """
+    if is_rustdoc_stylesheet(file_name):
+        return "css"
+    if is_favicon_svg(file_name):
+        return "favicon"
+    return ""
+
+def themed_text(action, text):
+    """The new content of a file that `theme_action` named `action`, given its old `text`."""
+    if action == "css":
+        return apply_rustdoc_theme(text)
+    if action == "favicon":
+        return krabka_logo_svg()
+    fail("themed_text: no theme action %r" % action)
+
+def apply_theme(fs, static_dir):
+    """Give the rustdoc `static_dir` the Krabka theme, and list the files it rewrote.
+
+    A crate tree without a `static_dir` is left alone.
+    """
+    rewritten = []
+    if not fs.exists(static_dir):
+        return rewritten
+    for entry in sorted(fs.read_dir(static_dir), key = lambda listed: listed.path):
+        action = theme_action(entry.path)
+        if not entry.is_file or not action:
+            continue
+        path = static_dir + "/" + entry.path
+        text = fs.read_to_string(path) if action == "css" else ""
+        fs.write(path, themed_text(action, text))
+        rewritten.append(entry.path)
+    return rewritten
+
+def _rustdoc_dir(fs, root, package):
+    directory = root + "/bazel-bin/crates/" + package
+    if not fs.exists(directory):
+        return ""
+    entry = find_rustdoc([listed.path for listed in fs.read_dir(directory)])
+    return directory + "/" + entry if entry else ""
+
+def find_crates(fs, root):
+    """The `struct`s `problems` checks, one per manifest under `root/crates/`, in directory order.
+
+    A missing `crates/` directory gives no crates, as an empty one does.
+    """
+    found = []
+    if not fs.exists(root + "/crates"):
+        return found
+    for entry in fs.read_dir(root + "/crates"):
+        if not entry.is_dir:
+            continue
+        manifest = root + "/crates/" + entry.path + "/Cargo.toml"
+        if not is_file(fs, manifest):
+            continue
+        lines = read_lines(fs, manifest)
+        name = manifest_field(lines, "name")
+        module = module_name(lines) if name else ""
+        rustdoc = _rustdoc_dir(fs, root, entry.path)
+        found.append(struct(
+            package = entry.path,
+            name = name,
+            snake = module,
+            description = manifest_field(lines, "description"),
+            rustdoc = rustdoc,
+            has_index = bool(rustdoc) and is_file(fs, rustdoc + "/" + module + "/index.html"),
+        ))
+
+    # The landing page's rows follow directory-name order.
+    return sorted(found, key = lambda crate: crate.package)
+
+def _repository(fs, root, override):
+    """The repository name: `override` when it is set, else what `repository_name` finds."""
+    if override:
+        return override
+    manifest = root + "/Cargo.toml"
+    return repository_name(read_lines(fs, manifest) if is_file(fs, manifest) else [], root)
+
+def write_site(fs, out, repo, crates):
+    """Empty `out`, mark it, and write the whole site of the repository `repo` into it.
+
+    `crates` are the checked crates of `problems`. Each crate's rustdoc tree is
+    copied to `<out>/<name>/`, themed, and given its redirect page. The landing
+    page and `.nojekyll` follow. The caller has asked `output_problem` first.
+    """
+    if fs.exists(out):
+        fs.remove_dir_all(out)
+    fs.create_dir_all(out)
+    fs.write(out + "/" + OUTPUT_MARKER, "written by the rustdoc-site task; the task empties this directory on its next run\n")
+
+    rows = []
+    for crate in crates:
+        destination = out + "/" + crate.name
+        copy_tree(fs, crate.rustdoc, destination)
+        apply_theme(fs, destination + "/static.files")
+        fs.write(destination + "/index.html", redirect_page(crate.name, crate.snake))
+        rows.append(struct(name = crate.name, snake = crate.snake, description = crate.description))
+    fs.write(out + "/index.html", landing_page(repo, rows))
+
+    # `.nojekyll` keeps Pages from dropping rustdoc's `static.files` and other
+    # underscore-prefixed paths.
+    fs.write(out + "/.nojekyll", "")
+
+def _impl(ctx: TaskContext) -> int:
+    fs = ctx.std.fs
+    root = ctx.std.env.bazel_root_dir()
+    if not ctx.args.output:
+        ctx.std.io.stderr.write("no output directory: pass --output\n")
+        return 2
+    out = normalize_path(resolve_output(root, ctx.args.output))
+
+    # `out` is emptied below, so refuse anything that could reach the checkout.
+    unsafe = output_problem(root, out, _output_entries(fs, out))
+    if unsafe:
+        ctx.std.io.stderr.write(unsafe + "\n")
+        return 2
+
+    crates = find_crates(fs, root)
+    if not crates:
+        ctx.std.io.stderr.write("no crates found under crates/\n")
+        return 1
+
+    # Every crate is checked before anything is written, so a missing rustdoc
+    # directory names all of its fellows too rather than only the first.
+    found = problems(crates)
+    for problem in found:
+        ctx.std.io.stderr.write(problem + "\n")
+    if found:
+        return 1
+
+    write_site(fs, out, _repository(fs, root, ctx.args.repo), crates)
+
+    ctx.std.io.stdout.write("rustdoc-site: wrote %s from %d crates\n" % (out, len(crates)))
+    return 0
+
+rustdoc_site = task(
+    summary = "Assemble the rendered rustdoc set into one static site",
+    implementation = _impl,
+    args = {
+        "output": args.string(
+            default = "site",
+            description = "Directory to write the site to, relative to the repository root.",
+        ),
+        "repo": args.string(
+            default = "",
+            description = "Repository name for the landing page. Default: the `repository` URL of the root Cargo.toml, else the checkout directory name.",
+        ),
+    },
+)
