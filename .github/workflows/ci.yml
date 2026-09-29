@@ -1,7 +1,8 @@
 # The gate for this repository. It holds no Rust, so there is no cargo job.
 # The checks here are the ones that can run without the repository under test:
-# the shell scripts parse, the Python compiles, and the packaging inputs are
-# well-formed YAML.
+# the shell scripts parse, the Python compiles, the packaging inputs are
+# well-formed YAML, and the unit tests of the AXL module pass. The AXL job needs
+# the Aspect CLI and no Bazel, because this repository has no Bazel workspace.
 #
 # The krabka repositories lint Rust with clippy through Bazel and lint no shell
 # or Python. This repository does not add shellcheck or ruff on its own.
@@ -110,3 +111,16 @@ jobs:
       # `helm install --verify`, so the gate reads it back.
       - name: chart signing public key parses
         run: gpg --show-keys --with-colons charts/krabka-charts.pub.asc
+
+  # The unit tests of the `rustdoc-site` module. `aspect axl-tests` reads
+  # `.aspect/axl_tests.axl` and runs every suite under `aspect/`. It never calls
+  # Bazel, so `setup-aspect` installs the CLI and nothing else.
+  axl-tests:
+    name: axl-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: aspect-build/setup-aspect@2306377a61c45954ab2df7c7311698b109364352 # v2026.26.9
+      - name: axl tests
+        run: aspect axl-tests
