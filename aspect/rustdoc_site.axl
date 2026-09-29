@@ -194,13 +194,15 @@ def _table_field(lines, tables, field):
         return value if value != None else ""
     return ""
 
-def manifest_field(lines, field):
-    """The string `field` is assigned on its first `field = "..."` line of `[package]`.
+def manifest_field(lines, field, table = "package"):
+    """The string `field` is assigned on its first `field = "..."` line of `[table]`.
 
-    The result is plain text; escape it before it goes into HTML. `_table_field`
+    `table` is `package` unless the caller names another, such as `lib`. Only
+    that exact table is read: `[lib.foo]` and `[[bin]]` are other tables. The
+    result is plain text; escape it before it goes into HTML. `_table_field`
     lists what the scan reads and what it skips.
     """
-    return _table_field(lines, ["package"], field)
+    return _table_field(lines, [table], field)
 
 def _github_repository(url):
     """The repository name in the GitHub `url`, or "" when `url` is not a GitHub one."""
@@ -230,6 +232,16 @@ def repository_name(lines, root):
 def snake(name):
     """The Rust module name for the crate Cargo calls `name`."""
     return name.replace("-", "_")
+
+def module_name(lines):
+    """The directory rustdoc writes the crate's pages to, from the manifest `lines`.
+
+    Rustdoc names it after the library. `[lib] name` sets that name. Without
+    one, the library takes the package name. Hyphens become underscores in
+    both. A `[lib]` name that is missing or not a string falls back to the
+    package name.
+    """
+    return snake(manifest_field(lines, "name", "lib") or manifest_field(lines, "name"))
 
 def find_rustdoc(entries):
     """The rustdoc directory among a listing's `entries`, or "" when there is none.
@@ -353,9 +365,10 @@ def resolve_output(root, output):
         return output
     return root + "/" + output
 
-# Top-level entries of the checkout that the output directory must not be, or
-# sit inside, because `_impl` empties the output directory before it writes.
-_PROTECTED_TOP_LEVEL = [".git", ".github", ".aspect", "bazel", "crates", "docs"]
+# The file that marks an output directory as one this task wrote. The task
+# empties only a directory that holds it, so a mistyped `--output` cannot
+# delete a directory of the repository.
+OUTPUT_MARKER = ".rustdoc-site"
 
 def normalize_path(path):
     """`path`, absolute, with `.` and `..` segments and repeated slashes collapsed.
@@ -373,12 +386,15 @@ def normalize_path(path):
         kept.append(segment)
     return "/" + "/".join(kept)
 
-def output_problem(root, out):
+def output_problem(root, out, entries):
     """Why `out` may not be emptied and rewritten, or "" when it may.
 
-    Both paths are normalized first. `out` must lie strictly inside `root`,
-    and not be, or sit under, one of the checkout's own top-level directories
-    (or a `bazel-*` output symlink), since `_impl` removes it before writing.
+    `entries` lists the names inside `out`, or is None when `out` does not
+    exist. Both paths are normalized first. `out` must lie strictly inside
+    `root`. Then one of three cases holds. A missing directory is fine. An
+    empty one is fine. A non-empty one is fine only when it holds
+    `OUTPUT_MARKER`, which an earlier run wrote. Any other directory is a
+    directory of the repository, and `write_site` would delete it.
     """
     normal_root = normalize_path(root)
     normal_out = normalize_path(out)
@@ -387,10 +403,21 @@ def output_problem(root, out):
         return "output directory %s is the repository root" % out
     if not normal_out.startswith(prefix):
         return "output directory %s is not inside the repository root %s" % (out, root)
-    top = normal_out[len(prefix):].split("/")[0]
-    if top in _PROTECTED_TOP_LEVEL or top.startswith("bazel-"):
-        return "output directory %s is inside %s, which holds the repository's own files" % (out, top)
+    if entries and OUTPUT_MARKER not in entries:
+        return "output directory %s exists, is not empty, and has no %s marker from an earlier run; remove it by hand or choose another path" % (out, OUTPUT_MARKER)
     return ""
+
+def _output_entries(fs, out):
+    """The names inside `out`, or None when it is missing.
+
+    A path that is a file, not a directory, reads as one unnamed entry, so it
+    counts as non-empty and has no marker.
+    """
+    if not fs.exists(out):
+        return None
+    if not fs.metadata(out).is_dir:
+        return [""]
+    return [entry.path for entry in fs.read_dir(out)]
 
 def copy_tree(fs, source, destination):
     """Copy the tree at `source` to `destination` writable, and count the files.
@@ -471,8 +498,14 @@ def _rustdoc_dir(fs, root, package):
     entry = find_rustdoc([listed.path for listed in fs.read_dir(directory)])
     return directory + "/" + entry if entry else ""
 
-def _crates(fs, root):
+def find_crates(fs, root):
+    """The `struct`s `problems` checks, one per manifest under `root/crates/`, in directory order.
+
+    A missing `crates/` directory gives no crates, as an empty one does.
+    """
     found = []
+    if not fs.exists(root + "/crates"):
+        return found
     for entry in fs.read_dir(root + "/crates"):
         if not entry.is_dir:
             continue
@@ -481,7 +514,7 @@ def _crates(fs, root):
             continue
         lines = read_lines(fs, manifest)
         name = manifest_field(lines, "name")
-        module = snake(name)
+        module = module_name(lines) if name else ""
         rustdoc = _rustdoc_dir(fs, root, entry.path)
         found.append(struct(
             package = entry.path,
@@ -503,15 +536,16 @@ def _repository(fs, root, override):
     return repository_name(read_lines(fs, manifest) if is_file(fs, manifest) else [], root)
 
 def write_site(fs, out, repo, crates):
-    """Empty `out` and write the whole site of the repository `repo` into it.
+    """Empty `out`, mark it, and write the whole site of the repository `repo` into it.
 
     `crates` are the checked crates of `problems`. Each crate's rustdoc tree is
     copied to `<out>/<name>/`, themed, and given its redirect page. The landing
-    page and `.nojekyll` follow.
+    page and `.nojekyll` follow. The caller has asked `output_problem` first.
     """
     if fs.exists(out):
         fs.remove_dir_all(out)
     fs.create_dir_all(out)
+    fs.write(out + "/" + OUTPUT_MARKER, "written by the rustdoc-site task; the task empties this directory on its next run\n")
 
     rows = []
     for crate in crates:
@@ -535,12 +569,12 @@ def _impl(ctx: TaskContext) -> int:
     out = normalize_path(resolve_output(root, ctx.args.output))
 
     # `out` is emptied below, so refuse anything that could reach the checkout.
-    unsafe = output_problem(root, out)
+    unsafe = output_problem(root, out, _output_entries(fs, out))
     if unsafe:
         ctx.std.io.stderr.write(unsafe + "\n")
         return 2
 
-    crates = _crates(fs, root)
+    crates = find_crates(fs, root)
     if not crates:
         ctx.std.io.stderr.write("no crates found under crates/\n")
         return 1

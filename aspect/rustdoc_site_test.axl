@@ -4,12 +4,15 @@ load(
     "./rustdoc_site.axl",
     "apply_theme",
     "copy_tree",
+    "find_crates",
     "find_rustdoc",
     "html_escape",
     "landing_page",
     "landing_row",
+    "module_name",
     "manifest_field",
     "normalize_path",
+    "OUTPUT_MARKER",
     "output_problem",
     "problems",
     "redirect_page",
@@ -351,6 +354,69 @@ def _test_repository_name(_ctx):
     for label, lines, root, want in cases:
         check_eq(label, repository_name(lines, root), want)
 
+def _test_module_name(_ctx):
+    # (label, the manifest lines, the module directory)
+    cases = [
+        ("no lib table", ["[package]", 'name = "krabka-log"'], "krabka_log"),
+        ("a lib name", ["[package]", 'name = "krabka-log"', "[lib]", 'name = "custom_name"'], "custom_name"),
+        ("a lib with a path only", ["[package]", 'name = "krabka-log"', "[lib]", 'path = "src/main.rs"'], "krabka_log"),
+        ("a lib name with a comment", ["[package]", 'name = "krabka-log"', "[lib]", 'name = "custom_name" # why'], "custom_name"),
+        ("a lib name with a hyphen", ["[package]", 'name = "krabka-log"', "[lib]", 'name = "custom-name"'], "custom_name"),
+        ("a lib before the package", ["[lib]", 'name = "custom_name"', "[package]", 'name = "krabka-log"'], "custom_name"),
+        ("a lib after the dependencies", ["[package]", 'name = "krabka-log"', "[dependencies]", 'name = "dep"', "[lib]", 'name = "custom_name"'], "custom_name"),
+        ("a lib name that is not a string", ["[package]", 'name = "krabka-log"', "[lib]", "name = 5"], "krabka_log"),
+        ("a lib name that is malformed", ["[package]", 'name = "krabka-log"', "[lib]", 'name = "a\\qb"'], "krabka_log"),
+        ("a bin name", ["[package]", 'name = "krabka-log"', "[[bin]]", 'name = "tool"'], "krabka_log"),
+        ("a bin before the lib", ["[package]", 'name = "krabka-log"', "[[bin]]", 'name = "tool"', "[lib]", 'name = "custom_name"'], "custom_name"),
+        ("a lib subtable", ["[package]", 'name = "krabka-log"', "[lib.foo]", 'name = "sub"'], "krabka_log"),
+        ("a lib key after the lib ends", ["[package]", 'name = "krabka-log"', "[lib]", 'path = "x.rs"', "[dependencies]", 'name = "dep"'], "krabka_log"),
+        ("a spaced lib header", ["[package]", 'name = "krabka-log"', "  [ lib ]  # the library", 'name = "custom_name"'], "custom_name"),
+    ]
+    for label, lines, want in cases:
+        check_eq(label, module_name(lines), want)
+
+def _test_manifest_field_reads_a_named_table(_ctx):
+    lines = ["[package]", 'name = "p"', "[lib]", 'name = "l"', "[lib.foo]", 'name = "f"', "[[bin]]", 'name = "b"']
+    check_eq("the package", manifest_field(lines, "name"), "p")
+    check_eq("the lib", manifest_field(lines, "name", "lib"), "l")
+    check_eq("the subtable", manifest_field(lines, "name", "lib.foo"), "f")
+    check_eq("a table that is absent", manifest_field(lines, "name", "features"), "")
+
+def _test_find_crates(ctx):
+    fs = ctx.std.fs
+    lib = 'name = "krabka-log"\ndescription = "The log"\n'
+    root = temp_tree(ctx, {
+        "with/crates/log/Cargo.toml": "[package]\n" + lib + "[lib]\nname = \"custom_name\"\n",
+        "with/crates/log/README.md": "not a manifest\n",
+        "with/crates/plain/Cargo.toml": '[package]\nname = "krabka-plain"\n',
+        "with/crates/loose.txt": "not a crate directory\n",
+        "with/bazel-bin/crates/log/log_doc.rustdoc/custom_name/index.html": "x\n",
+        "empty/README.md": "x\n",
+    })
+    fs.create_dir_all(root + "/empty2/crates")
+    got = find_crates(fs, root + "/with")
+    want = [
+        struct(
+            package = "log",
+            name = "krabka-log",
+            snake = "custom_name",
+            description = "The log",
+            rustdoc = root + "/with/bazel-bin/crates/log/log_doc.rustdoc",
+            has_index = True,
+        ),
+        struct(
+            package = "plain",
+            name = "krabka-plain",
+            snake = "krabka_plain",
+            description = "",
+            rustdoc = "",
+            has_index = False,
+        ),
+    ]
+    check_eq("two crates, one with a lib name", got, want)
+    check_eq("no crates directory", find_crates(fs, root + "/empty"), [])
+    check_eq("an empty crates directory", find_crates(fs, root + "/empty2"), [])
+
 def _test_snake_is_the_crates_module_name(_ctx):
     check_eq("one dash", snake("krabka-log"), "krabka_log")
     check_eq("two dashes", snake("krabka-remote-storage"), "krabka_remote_storage")
@@ -552,68 +618,57 @@ def _test_output_problem_rejects_unsafe_directories(_ctx):
         ("a sibling by absolute path", "/sibling"),
         ("a name that starts like the root", "/wx"),
         ("a sibling that starts like the root", "/wx/site"),
-        ("crates", "crates"),
-        ("inside crates", "crates/site"),
-        ("crates by a detour", "site/../crates"),
-        ("crates by dot segments", "./crates/../crates"),
-        ("crates with a trailing slash", "./crates/"),
-        (".git", ".git"),
-        ("inside .git", ".git/site"),
-        (".github", ".github"),
-        (".aspect", ".aspect"),
-        ("bazel", "bazel"),
-        ("docs", "docs"),
-        ("a bazel output symlink", "bazel-bin"),
-        ("another bazel output symlink", "bazel-out/site"),
-        ("an absolute path into crates", "/w/crates"),
-        ("an absolute path with a doubled slash", "/w//.git"),
     ]
     for label, output in outputs:
-        check_eq(label, output_problem(root, resolve_output(root, output)) != "", True)
+        # Even a marked root is refused: the marker only frees a directory below the root.
+        got = output_problem(root, resolve_output(root, output), [OUTPUT_MARKER])
+        check_eq(label, got != "", True)
 
 def _test_output_problem_rejects_a_relative_path(_ctx):
-    check_eq("a path that is not absolute", output_problem("/w", "site") != "", True)
+    check_eq("a path that is not absolute", output_problem("/w", "site", None) != "", True)
 
-def _test_output_problem_accepts_a_fresh_subdirectory(_ctx):
+def _test_output_problem_decides_by_the_directory_contents(_ctx):
     root = "/w"
-    for label, output in [
-        ("the default", "site"),
-        ("nested", "out/site"),
-        ("an absolute path inside the root", "/w/site"),
-        ("a dot segment", "./site"),
-        ("a detour", "a/../site"),
-        ("a repeated slash", "/w//site/"),
-        ("below a name that looks protected", "sites/crates"),
-        ("a name that only starts like a protected one", "crates-site"),
-        ("a name that only starts like a bazel link", "bazelsite"),
-    ]:
-        check_eq(label, output_problem(root, resolve_output(root, output)), "")
-    check_eq("a checkout at the filesystem root", output_problem("/", "/site"), "")
+    unmarked = "output directory %s exists, is not empty, and has no .rustdoc-site marker from an earlier run; remove it by hand or choose another path"
+    # (label, output, entries, the problem)
+    cases = [
+        ("a missing directory", "site", None, ""),
+        ("a nested missing directory", "out/site", None, ""),
+        ("an empty directory", "site", [], ""),
+        ("a marked directory", "site", [OUTPUT_MARKER, "index.html", "krabka-log"], ""),
+        ("a marked directory with only the marker", "site", [OUTPUT_MARKER], ""),
+        ("an absolute path inside the root", "/w/site", None, ""),
+        ("a detour", "a/../site", None, ""),
+        ("a repeated slash", "/w//site/", [OUTPUT_MARKER], ""),
+        ("a directory of the repository", "src", ["lib.rs", "src"], unmarked % "/w/src"),
+        ("a directory of sources with a sub-directory", "src", ["src"], unmarked % "/w/src"),
+        ("scripts", "scripts", ["check.sh"], unmarked % "/w/scripts"),
+        ("release", "release", ["a.toml"], unmarked % "/w/release"),
+        ("crates", "crates", ["log"], unmarked % "/w/crates"),
+        ("the git directory", ".git", ["HEAD"], unmarked % "/w/.git"),
+        ("a bazel output link", "bazel-bin", ["crates"], unmarked % "/w/bazel-bin"),
+        ("a directory below a marker-less one", "src/site", ["a"], unmarked % "/w/src/site"),
+        ("a file", "site", [""], unmarked % "/w/site"),
+        ("a marker-like name", "site", [".rustdoc-site.bak"], unmarked % "/w/site"),
+        ("an unmarked directory by a detour", "site/../src", ["lib.rs"], unmarked % "/w/site/../src"),
+    ]
+    for label, output, entries, want in cases:
+        check_eq(label, output_problem(root, resolve_output(root, output), entries), want)
+    check_eq("a checkout at the filesystem root", output_problem("/", "/site", None), "")
 
 def _test_output_problem_names_the_reason(_ctx):
     cases = [
-        ("the root", "/w", "/w", "output directory /w is the repository root"),
+        ("the root", "/w", "/w", [OUTPUT_MARKER], "output directory /w is the repository root"),
         (
             "an ancestor",
             "/w/r",
             "/w",
+            None,
             "output directory /w is not inside the repository root /w/r",
         ),
-        (
-            "a protected directory",
-            "/w",
-            "/w/crates/x",
-            "output directory /w/crates/x is inside crates, which holds the repository's own files",
-        ),
-        (
-            "a bazel link",
-            "/w",
-            "/w/bazel-bin",
-            "output directory /w/bazel-bin is inside bazel-bin, which holds the repository's own files",
-        ),
     ]
-    for label, root, out, want in cases:
-        check_eq(label, output_problem(root, out), want)
+    for label, root, out, entries, want in cases:
+        check_eq(label, output_problem(root, out, entries), want)
 
 def _test_copy_tree_reproduces_the_whole_subtree(ctx):
     fs = ctx.std.fs
@@ -744,6 +799,7 @@ def _test_write_site_writes_the_whole_tree(ctx):
         "krabka-log/static.files/main-3.js": "js\n",
         "index.html": landing_page("krabka-sample", [_row("krabka-log", "The log")]),
         ".nojekyll": "",
+        OUTPUT_MARKER: "written by the rustdoc-site task; the task empties this directory on its next run\n",
     }
     got = {name: fs.read_to_string(root + "/site/" + name) for name in want}
     check_eq("the site's files", got, want)
@@ -758,6 +814,9 @@ rustdoc_site_tests = suite("rustdoc-site", [
     _test_manifest_field_ignores_what_it_cannot_parse,
     _test_manifest_field_reads_only_the_package_table,
     _test_repository_name,
+    _test_module_name,
+    _test_manifest_field_reads_a_named_table,
+    _test_find_crates,
     _test_snake_is_the_crates_module_name,
     _test_find_rustdoc_picks_the_doc_directory,
     _test_find_rustdoc_without_one,
@@ -778,7 +837,7 @@ rustdoc_site_tests = suite("rustdoc-site", [
     _test_normalize_path,
     _test_output_problem_rejects_unsafe_directories,
     _test_output_problem_rejects_a_relative_path,
-    _test_output_problem_accepts_a_fresh_subdirectory,
+    _test_output_problem_decides_by_the_directory_contents,
     _test_output_problem_names_the_reason,
     _test_copy_tree_reproduces_the_whole_subtree,
     _test_copy_tree_leaves_the_copy_writable,
