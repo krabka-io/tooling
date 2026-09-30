@@ -42,7 +42,7 @@ table.crates td a:hover code{color:#ffb39e}
 .site-footer p{margin:.25rem 0}
 main.redirect{padding-top:4rem;padding-bottom:4rem}
 main.redirect p{margin:0;color:#9ca3af}
-@media (max-width:40rem){table.crates th,table.crates td{padding:.7rem .75rem}table.crates td:first-child{white-space:normal;overflow-wrap:anywhere}.site-header{padding-top:2rem}}
+@media (max-width:40rem){table.crates th,table.crates td{padding:.7rem .75rem}table.crates td:first-child{white-space:normal;overflow-wrap:anywhere;padding-bottom:0;border-bottom:0}table.crates,table.crates tbody,table.crates tr,table.crates td{display:block}table.crates thead{display:none}.site-header{padding-top:2rem}}
 """
 
 _THEME_SELECTORS = ':root[data-theme="light"],:root:not([data-theme]),:root[data-theme="dark"],:root[data-theme="ayu"]'
@@ -179,6 +179,7 @@ body.rustdoc .docblock code,body.rustdoc .item-info code,body.rustdoc .item-tabl
 :root[data-theme] #search-tabs>button:hover{border-bottom:1px solid rgba(255,77,46,.4)}
 :root[data-theme] .settings-menu>a img,:root[data-theme] #sidebar-button>a::before{filter:invert(100)}
 body.rustdoc a:focus-visible{outline:2px solid #ff4d2e;outline-offset:2px}
+body.rustdoc #theme,body.rustdoc #preferred-light-theme,body.rustdoc #preferred-dark-theme{display:none}
 """
 
 def landing_style():
