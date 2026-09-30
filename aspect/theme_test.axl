@@ -260,6 +260,16 @@ def _test_landing_style_keeps_the_dark_page_background(ctx):
     )
     check("landing ends with a newline", landing_style().endswith("\n"))
 
+def _test_landing_style_stacks_the_crate_rows_on_phones(ctx):
+    phone = landing_style().split("@media (max-width:40rem){")[1]
+    check("rows are blocks", "table.crates tr,table.crates td{display:block}" in phone)
+    check("header row is hidden", "table.crates thead{display:none}" in phone)
+
+def _test_theme_hides_the_dead_theme_settings(ctx):
+    css = rustdoc_theme_css()
+    for row in ["#theme", "#preferred-light-theme", "#preferred-dark-theme"]:
+        check("%s row" % row, "body.rustdoc %s" % row in css)
+
 def _test_fonts_url_names_both_families(ctx):
     url = fonts_url()
     check("https", url.startswith("https://fonts.googleapis.com/css2?"))
@@ -286,6 +296,8 @@ theme_tests = suite("theme", [
     _test_style_sheets_cannot_break_out_of_a_style_element,
     _test_style_sheet_braces_balance,
     _test_landing_style_keeps_the_dark_page_background,
+    _test_landing_style_stacks_the_crate_rows_on_phones,
+    _test_theme_hides_the_dead_theme_settings,
     _test_fonts_url_names_both_families,
     _test_krabka_logo_svg_is_one_well_formed_element,
 ])
