@@ -36,11 +36,13 @@ on:
 jobs:
   release-checks:
     name: release-checks
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     permissions:
       contents: read
     steps:
+      - name: Keep temporary files off the size-limited /tmp tmpfs
+        run: echo "TMPDIR=${RUNNER_TEMP}" >> "${GITHUB_ENV}"
       # In a called workflow this checks out the CALLING repository at the
       # commit that called it. That tree is what both scripts below read.
       - name: check out the calling repository
