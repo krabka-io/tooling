@@ -18,6 +18,7 @@ shared `rustdoc-site` task of the Aspect CLI.
 | [`release/`](release/README.md) | Publish gate, version bumper, crates.io bootstrap, and the release-plz templates | Every krabka-io Rust repository |
 | [`packaging/`](packaging/README.md) | The Creusot verifier toolchain recipe and a local-binary Dockerfile | krabka-broker, local runs |
 | [`aspect/`](aspect/) | The AXL module that exports the `rustdoc-site` task, and the Krabka theme of the pages it publishes | Every krabka-io Rust repository that publishes API documentation |
+| [`actions/upload-rustdoc-pages/`](actions/upload-rustdoc-pages/) | Filtered Pages packaging and final archive validation | Every krabka-io Rust repository that publishes API documentation |
 | [`scripts/`](scripts/) | Repository-agnostic check scripts | Named per script below |
 | [`charts/`](charts/README.md) | The Helm chart signing public key | `krabka-operator`, `krabka-rebalancer`, `krabka-schema-registry` |
 
