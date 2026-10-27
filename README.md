@@ -2,14 +2,13 @@
 
 Shared build and release inputs for the krabka-io repositories.
 
-Krabka was one monorepo. It is now about a dozen repositories. Three kinds of
-file could not follow a single component out, because every component needs
-them: the release tooling, the container base-image recipes, and the Helm chart
-signing key. They live here.
+Krabka was one monorepo. It is now about a dozen repositories. Shared release
+tools, container recipes, documentation tools, and the Helm chart signing key
+live here. Multiple component repositories use these files.
 
 This repository holds no Rust. There is no `Cargo.toml`, no Bazel workspace and
 no toolchain file. Nothing here is built. It also holds one AXL module, the
-shared `rustdoc-site` task of the Aspect CLI.
+shared `rustdoc-site` task of the Aspect CLI, and a Pages upload action.
 
 ## Directories
 
@@ -52,6 +51,16 @@ jobs:
 Configuration is the exception. `release-plz` reads its two TOML files from the
 root of the repository it releases and cannot fetch them, so those are copied.
 [`release/README.md`](release/README.md) states the whole contract.
+
+## How a repository consumes the Pages upload action
+
+Keep the existing documentation build and site assembly steps. Replace the
+Pages upload step with `actions/upload-rustdoc-pages` from this repository.
+Pin it to a reviewed commit. Do not copy its files into consumers.
+
+See [the action guide](actions/upload-rustdoc-pages/README.md) for the input,
+file selection rules, required tools, and deployment job setup. The action pin
+is separate from the AXL module pin.
 
 ## How a repository consumes the AXL module
 
