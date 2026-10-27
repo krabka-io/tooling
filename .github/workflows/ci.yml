@@ -1,7 +1,7 @@
 # The gate for this repository. It holds no Rust, so there is no cargo job.
 # The checks here are the ones that can run without the repository under test:
 # the shell scripts parse, the Python compiles, the packaging inputs are
-# well-formed YAML, and the unit tests of the AXL module pass. The AXL job needs
+# well-formed YAML, and the AXL and Pages packaging tests pass. The AXL job needs
 # the Aspect CLI and no Bazel, because this repository has no Bazel workspace.
 #
 # The krabka repositories lint Rust with clippy through Bazel and lint no shell
@@ -67,7 +67,7 @@ jobs:
           print("embedded python compiles")
           PY
 
-      - name: packaging inputs are valid yaml
+      - name: packaging inputs and actions are valid yaml
         run: |
           python3 - <<'PY'
           import pathlib
@@ -76,7 +76,9 @@ jobs:
           import yaml
 
           status = 0
-          for path in sorted(pathlib.Path("packaging").rglob("*.yaml")):
+          paths = list(pathlib.Path("packaging").rglob("*.yaml"))
+          paths.extend(pathlib.Path("actions").rglob("*.yml"))
+          for path in sorted(paths):
               try:
                   # A melange recipe holds its own placeholders, and those are
                   # plain text to a YAML parser, so no pre-pass is needed.
@@ -119,6 +121,8 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     steps:
+      - name: Keep temporary files off the size-limited /tmp tmpfs
+        run: echo "TMPDIR=${RUNNER_TEMP}" >> "${GITHUB_ENV}"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install rustdoc for behavioral checks
         run: |
