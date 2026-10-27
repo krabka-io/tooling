@@ -1,7 +1,7 @@
 # The gate for this repository. It holds no Rust, so there is no cargo job.
 # The checks here are the ones that can run without the repository under test:
 # the shell scripts parse, the Python compiles, the packaging inputs are
-# well-formed YAML, and the unit tests of the AXL module pass. The AXL job needs
+# well-formed YAML, and the AXL and Pages packaging tests pass. The AXL job needs
 # the Aspect CLI and no Bazel, because this repository has no Bazel workspace.
 #
 # The krabka repositories lint Rust with clippy through Bazel and lint no shell
@@ -52,7 +52,7 @@ jobs:
           exit "${status}"
 
       - name: python compiles
-        run: python3 -m compileall -q release
+        run: python3 -m compileall -q release actions
 
       # `check-publish-allowlist.sh` embeds a Python program in a heredoc, so
       # `compileall` never sees it. This extracts that program and compiles it.
@@ -67,7 +67,7 @@ jobs:
           print("embedded python compiles")
           PY
 
-      - name: packaging inputs are valid yaml
+      - name: packaging inputs and actions are valid yaml
         run: |
           python3 - <<'PY'
           import pathlib
@@ -76,7 +76,9 @@ jobs:
           import yaml
 
           status = 0
-          for path in sorted(pathlib.Path("packaging").rglob("*.yaml")):
+          paths = list(pathlib.Path("packaging").rglob("*.yaml"))
+          paths.extend(pathlib.Path("actions").rglob("*.yml"))
+          for path in sorted(paths):
               try:
                   # A melange recipe holds its own placeholders, and those are
                   # plain text to a YAML parser, so no pre-pass is needed.
@@ -113,6 +115,40 @@ jobs:
       # `helm install --verify`, so the gate reads it back.
       - name: chart signing public key parses
         run: gpg --show-keys --with-colons charts/krabka-charts.pub.asc
+
+  rustdoc-pages:
+    name: rustdoc-pages
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    steps:
+      - name: Keep temporary files off the size-limited /tmp tmpfs
+        run: echo "TMPDIR=${RUNNER_TEMP}" >> "${GITHUB_ENV}"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install rustdoc for behavioral checks
+        run: |
+          rustup toolchain install 1.99.0 --profile minimal
+          echo "${HOME}/.rustup/toolchains/1.99.0-x86_64-unknown-linux-gnu/bin" >> "${GITHUB_PATH}"
+      - name: Packaging regressions
+        run: python3 -m unittest discover -s actions/upload-rustdoc-pages -p 'test_*.py' -v
+      - name: Render source fixture and inject excluded files
+        shell: bash
+        run: |
+          set -euo pipefail
+          fixture="${RUNNER_TEMP}/rustdoc-fixture"
+          mkdir -p "${fixture}/home/runner/.cache/bazel/_bazel_runner/generated"
+          cd "${fixture}"
+          echo 'pub struct Message;' > home/runner/.cache/bazel/_bazel_runner/generated/message.rs
+          echo 'include!("home/runner/.cache/bazel/_bazel_runner/generated/message.rs");' > lib.rs
+          rustdoc --crate-name fixture lib.rs -o site
+          echo 'must not publish' > site/.env
+          mkdir -p site/.github
+          echo 'must not publish' > site/.github/token
+          mkdir -p site/src/fixture/home/runner/.cache/bazel/_bazel_runner/generated
+          echo 'must not publish' > site/src/fixture/home/runner/.cache/bazel/_bazel_runner/generated/unlinked.rs.html
+      - name: Exercise shared upload and final archive verification
+        uses: ./actions/upload-rustdoc-pages
+        with:
+          path: ${{ runner.temp }}/rustdoc-fixture/site
 
   # The unit tests of the `rustdoc-site` module. `aspect axl-tests` reads
   # `.aspect/axl_tests.axl` and runs every suite under `aspect/`. It never calls
