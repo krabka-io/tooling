@@ -1,0 +1,36 @@
+name: Upload rustdoc Pages
+description: Stage public rustdoc files and linked hidden source pages, then verify the Pages archive.
+inputs:
+  path:
+    description: Assembled rustdoc site, relative to the caller working directory or absolute.
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Stage public docs and linked source pages
+      id: stage
+      shell: bash
+      env:
+        SITE_PATH: ${{ inputs.path }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        staging_root="$(mktemp -d "${RUNNER_TEMP}/rustdoc-pages.XXXXXX")"
+        python3 "${ACTION_PATH}/pages_site.py" stage "${SITE_PATH}" "${staging_root}/site"
+        echo "path=${staging_root}/site" >> "${GITHUB_OUTPUT}"
+
+    - name: Upload the validated staging tree
+      uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+      with:
+        path: ${{ steps.stage.outputs.path }}
+        # Never enable this on the checkout or raw build output.
+        include-hidden-files: true
+
+    - name: Verify the final Pages archive
+      shell: bash
+      env:
+        STAGED_PATH: ${{ steps.stage.outputs.path }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        python3 "${ACTION_PATH}/pages_site.py" verify "${STAGED_PATH}" "${RUNNER_TEMP}/artifact.tar"
