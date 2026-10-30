@@ -8,6 +8,7 @@ import tempfile
 import unittest
 
 from pages_site import stage, verify_archive
+from archive_links import Gate, Mount
 
 
 class PagesSiteTest(unittest.TestCase):
@@ -140,10 +141,15 @@ class PagesSiteTest(unittest.TestCase):
         raw = self.root / "rustdoc"
         subprocess.run(["rustdoc", "--crate-name", "repro", "lib.rs", "-o", str(raw)],
                        cwd=self.root, check=True)
+        # Site assembly supplies the root landing page used by help/settings.
+        (raw / 'index.html').write_text('<a href="repro/index.html">Crates</a>')
         stage(raw, self.output)
         self.assertTrue(any(".cache" in p.parts for p in self.output.rglob("*.rs.html")))
         self.package()
         verify_archive(self.output, self.archive)
+        gate = Gate([Mount('https://docs.example/', self.archive)])
+        gate.static()
+        self.assertEqual(gate.errors, [])
 
 
 if __name__ == "__main__":

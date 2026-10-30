@@ -4,6 +4,19 @@ inputs:
   path:
     description: Assembled rustdoc site, relative to the caller working directory or absolute.
     required: true
+  site-url:
+    description: Public URL of the archive root, including the deployment prefix.
+    default: https://pages.invalid/
+  component-archives:
+    description: Optional JSON file with site_url and archive entries for cross-component checks.
+    default: ''
+  render-pages:
+    description: Optional JSON file listing archive-relative pages for installed Playwright Chromium checks.
+    default: ''
+outputs:
+  link-report:
+    description: JSON archive link report on the runner.
+    value: ${{ steps.stage.outputs.report }}
 runs:
   using: composite
   steps:
@@ -18,6 +31,7 @@ runs:
         staging_root="$(mktemp -d "${RUNNER_TEMP}/rustdoc-pages.XXXXXX")"
         python3 "${ACTION_PATH}/pages_site.py" stage "${SITE_PATH}" "${staging_root}/site"
         echo "path=${staging_root}/site" >> "${GITHUB_OUTPUT}"
+        echo "report=${staging_root}/links.json" >> "${GITHUB_OUTPUT}"
 
     - name: Upload the validated staging tree
       uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
@@ -34,3 +48,22 @@ runs:
       run: |
         set -euo pipefail
         python3 "${ACTION_PATH}/pages_site.py" verify "${STAGED_PATH}" "${RUNNER_TEMP}/artifact.tar"
+
+    - name: Check links in the final Pages archive
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        SITE_URL: ${{ inputs.site-url }}
+        COMPONENT_ARCHIVES: ${{ inputs.component-archives }}
+        RENDER_PAGES: ${{ inputs.render-pages }}
+        LINK_REPORT: ${{ steps.stage.outputs.report }}
+      run: |
+        set -euo pipefail
+        options=(--site-url "${SITE_URL}" --report "${LINK_REPORT}")
+        if [[ -n "${COMPONENT_ARCHIVES}" ]]; then
+          options+=(--components "${COMPONENT_ARCHIVES}")
+        fi
+        if [[ -n "${RENDER_PAGES}" ]]; then
+          options+=(--render-pages "${RENDER_PAGES}")
+        fi
+        python3 "${ACTION_PATH}/archive_links.py" "${RUNNER_TEMP}/artifact.tar" "${options[@]}"
