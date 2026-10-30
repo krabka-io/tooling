@@ -128,7 +128,13 @@ jobs:
         run: |
           rustup toolchain install 1.99.0 --profile minimal
           echo "${HOME}/.rustup/toolchains/1.99.0-x86_64-unknown-linux-gnu/bin" >> "${GITHUB_PATH}"
-      - name: Packaging regressions
+      - name: Install browser checks
+        run: |
+          python3 -m venv "${RUNNER_TEMP}/archive-check-env"
+          "${RUNNER_TEMP}/archive-check-env/bin/pip" install playwright==1.64.1
+          "${RUNNER_TEMP}/archive-check-env/bin/python" -m playwright install --with-deps chromium
+          echo "${RUNNER_TEMP}/archive-check-env/bin" >> "${GITHUB_PATH}"
+      - name: Packaging and archive link regressions
         run: python3 -m unittest discover -s actions/upload-rustdoc-pages -p 'test_*.py' -v
       - name: Render source fixture and inject excluded files
         shell: bash
@@ -140,15 +146,19 @@ jobs:
           echo 'pub struct Message;' > home/runner/.cache/bazel/_bazel_runner/generated/message.rs
           echo 'include!("home/runner/.cache/bazel/_bazel_runner/generated/message.rs");' > lib.rs
           rustdoc --crate-name fixture lib.rs -o site
+          echo '<a href="fixture/index.html">Crates</a>' > site/index.html
           echo 'must not publish' > site/.env
           mkdir -p site/.github
           echo 'must not publish' > site/.github/token
           mkdir -p site/src/fixture/home/runner/.cache/bazel/_bazel_runner/generated
           echo 'must not publish' > site/src/fixture/home/runner/.cache/bazel/_bazel_runner/generated/unlinked.rs.html
+      - name: Select rendered fixture page
+        run: echo '["fixture/index.html"]' > "${RUNNER_TEMP}/render-pages.json"
       - name: Exercise shared upload and final archive verification
         uses: ./actions/upload-rustdoc-pages
         with:
           path: ${{ runner.temp }}/rustdoc-fixture/site
+          render-pages: ${{ runner.temp }}/render-pages.json
 
   # The unit tests of the `rustdoc-site` module. `aspect axl-tests` reads
   # `.aspect/axl_tests.axl` and runs every suite under `aspect/`. It never calls
