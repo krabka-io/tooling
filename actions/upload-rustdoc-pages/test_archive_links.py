@@ -35,7 +35,7 @@ class ArchiveLinksTest(unittest.TestCase):
 
     def test_relative_root_index_fragment_and_query(self):
         gate = self.gate({'index.html': '<a href="module/">module</a>',
-                          'module/index.html': '<a href="/api/index.html?q=x#top">root</a>',
+                          'module/index.html': '<a href="/api/index.html?q=x#missing">root</a>',
                           'another.html': '<a href="module#hello%20world">index</a>',
                           'asset.svg': '<svg/>',
                           'unused.html': '<img src="asset.svg?version=1">'})
@@ -48,6 +48,18 @@ class ArchiveLinksTest(unittest.TestCase):
         gate = self.gate({'index.html': '<a href="/api#encoded%3CT%3E">root</a>'
                           '<div id="encoded%3CT%3E"></div>'})
         self.assertEqual(gate.errors, [])
+
+    def test_builtin_top_fragment_preserves_validation(self):
+        for fragment in ('top', 'TOP', 'ToP', '%74op'):
+            with self.subTest(fragment=fragment):
+                gate = self.gate({'index.html': f'<a href="#{fragment}">top</a>'})
+                self.assertEqual(gate.errors, [])
+        gate = self.gate({'index.html': '<a href="missing.html#top">missing page</a>'
+                          '<a href="#ordinary">missing fragment</a>'
+                          '<div id="CaseSensitive"></div><a href="#casesensitive">case</a>'})
+        self.assertEqual(len(gate.errors), 3)
+        self.assertIn('Missing destination', gate.errors[0])
+        self.assertTrue(all('Missing fragment' in e for e in gate.errors[1:]))
 
     def test_proven_malformed_and_bare_reference_families(self):
         for href in ('Self::attr()', 'super::Subscriber', 'ObjectMeta::new',

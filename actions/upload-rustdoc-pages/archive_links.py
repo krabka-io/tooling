@@ -149,7 +149,8 @@ class Gate:
                                 and name.endswith('.rs.html')
                                 and int(line_range[1]) <= int(line_range[2])
                                 and all(part in ids for part in line_range.groups()))
-                if raw_fragment not in ids and fragment not in ids and not source_range:
+                if (raw_fragment not in ids and fragment not in ids and not source_range
+                        and fragment.lower() != 'top'):
                     raise ValueError(f'Missing fragment: {target}')
         except ValueError as error:
             self.errors.append(f'{origin}: {href!r}: {error}')
