@@ -129,6 +129,29 @@ class ArchiveLinksTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'nonempty JSON list'):
             Gate([mount]).render([], mount)
 
+    def test_rendered_target_ids_survive_static_pass(self):
+        mount = self.mount({
+            'index.html': '<a href="target.html#dynamic">dynamic</a>'
+                          '<a href="plain.html#missing">missing</a>',
+            'target.html': '<body><div id="gone"></div><script src="main.js"></script>'
+                           '<a href="#dynamic">self</a>',
+            'plain.html': '<div id="static"></div>',
+            'main.js': 'document.getElementById("gone").remove();'
+                       'document.body.insertAdjacentHTML("beforeend", `<div id="dynamic"></div>`);',
+            'empty.html': '<div id="gone"></div><script src="empty.js"></script>',
+            'empty.js': 'document.getElementById("gone").remove();',
+        })
+        gate = Gate([mount])
+        gate.render(['target.html', 'empty.html'], mount)
+        gate.static()
+        self.assertEqual(len(gate.errors), 1)
+        self.assertIn('plain.html#missing', gate.errors[0])
+        gate.check(mount.root, 'target.html#gone')
+        gate.check(mount.root, 'empty.html#gone')
+        self.assertEqual(len(gate.errors), 3)
+        gate.check(mount.root, 'plain.html#static')
+        self.assertEqual(len(gate.errors), 3)
+
     def test_rendered_links_from_archived_script(self):
         try:
             import playwright.sync_api  # noqa: F401

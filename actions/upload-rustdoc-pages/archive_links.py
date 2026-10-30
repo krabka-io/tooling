@@ -142,9 +142,7 @@ class Gate:
             raw_fragment = urlsplit(target).fragment
             fragment = unquote(raw_fragment)
             if fragment and name in mount.pages:
-                ids = mount.pages[name].ids
-                if rendered:
-                    ids = self.rendered_ids.get((mount.root, name), ids)
+                ids = self.rendered_ids.get((mount.root, name), mount.pages[name].ids)
                 # Rustdoc source-line ranges select existing line anchors in JS.
                 line_range = re.fullmatch(r'(\d+)-(\d+)', fragment)
                 source_range = (line_range and '/src/' in '/' + name
