@@ -1,0 +1,8 @@
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -120,3 +120,4 @@
++#![doc(html_root_url = "https://docs.rs/tracing-core/0.1.36/")]
+ #![no_std]
+ #![doc(
+     html_logo_url = "https://raw.githubusercontent.com/tokio-rs/tracing/main/assets/logo-type.png",
