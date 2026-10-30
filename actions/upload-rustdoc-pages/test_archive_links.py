@@ -152,6 +152,34 @@ class ArchiveLinksTest(unittest.TestCase):
         gate.check(mount.root, 'plain.html#static')
         self.assertEqual(len(gate.errors), 3)
 
+    def test_rendered_css_resource_mount_coverage(self):
+        mount = self.mount({
+            'index.html': '<link rel="stylesheet" href="style.css"><div>resource</div>',
+            'style.css': 'div { background-image: url("/assets/image.svg"); }',
+        })
+        gate = Gate([mount])
+        gate.render(['index.html'], mount)
+        gate.static()
+        self.assertTrue(any('Unmapped same-site resource' in e for e in gate.errors))
+        assets = self.mount({'index.html': 'assets', 'image.svg': '<svg/>'},
+                            'https://docs.example/assets/', 'assets.tar')
+        gate = Gate([mount, assets])
+        gate.render(['index.html'], mount)
+        gate.static()
+        self.assertEqual(gate.errors, [])
+        del assets.files['image.svg']
+        gate = Gate([mount, assets])
+        gate.render(['index.html'], mount)
+        self.assertTrue(any('Rendered resource missing' in e for e in gate.errors))
+        external = self.mount({
+            'index.html': '<link rel="stylesheet" href="style.css"><div>resource</div>',
+            'style.css': 'div { background-image: url("https://other.example/image.svg"); }',
+        })
+        gate = Gate([external])
+        gate.render(['index.html'], external)
+        gate.static()
+        self.assertEqual(gate.errors, [])
+
     def test_rendered_links_from_archived_script(self):
         try:
             import playwright.sync_api  # noqa: F401

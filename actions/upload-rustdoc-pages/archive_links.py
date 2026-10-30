@@ -177,6 +177,10 @@ class Gate:
             def serve(route):
                 mount, name = self.lookup(route.request.url)
                 if mount is None:
+                    netloc = urlsplit(route.request.url).netloc.lower()
+                    if any(urlsplit(m.root).netloc == netloc for m in self.mounts):
+                        self.errors.append(f'Unmapped same-site resource: {route.request.url}; '
+                                           'supply its component archive')
                     route.abort()
                 elif name is None:
                     self.errors.append(f'Rendered resource missing: {route.request.url}')
