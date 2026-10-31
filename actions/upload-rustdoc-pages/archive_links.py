@@ -164,8 +164,12 @@ class Gate:
                     self.check(origin, href, base)
 
     def render(self, paths, primary):
-        if not isinstance(paths, list) or not paths or not all(isinstance(p, str) for p in paths):
-            raise ValueError('Rendered pages must be a nonempty JSON list of HTML paths')
+        self.render_many([(paths, primary)])
+
+    def render_many(self, selections):
+        for paths, primary in selections:
+            if not isinstance(paths, list) or not paths or not all(isinstance(p, str) for p in paths):
+                raise ValueError('Rendered pages must be a nonempty JSON list of HTML paths')
         # Optional dependency. Fail if requested checks cannot run.
         from playwright.sync_api import sync_playwright
         with sync_playwright() as engine:
@@ -198,23 +202,24 @@ class Gate:
             context.route('**/*', serve)
             context.route_web_socket('**/*', lambda socket: socket.close())
             documents = []
-            for path in paths:
-                url = urljoin(primary.root, path)
-                mount, name = self.lookup(url)
-                if mount is not primary or name not in primary.pages:
-                    raise ValueError(f'Render page is not HTML in the primary archive: {path}')
-                page = context.new_page()
-                page.on('pageerror', lambda error: self.errors.append(f'Render error: {error}'))
-                page.goto(url, wait_until='networkidle')
-                # Collect all IDs first, so links between rendered pages can resolve.
-                self.rendered_ids[(primary.root, name)] = set(page.locator('[id], a[name]').evaluate_all(
-                    '(nodes) => nodes.map(node => node.id || node.getAttribute("name"))'))
-                documents.append((page.url, page.locator('[href], [src]').evaluate_all(
-                    '(nodes) => nodes.filter(n => n.tagName !== "BASE").map(n => '
-                    'n.getAttribute("href") || n.getAttribute("src"))'),
-                    page.evaluate('document.baseURI')))
-                self.rendered += 1
-                page.close()
+            for paths, primary in selections:
+                for path in paths:
+                    url = urljoin(primary.root, path)
+                    mount, name = self.lookup(url)
+                    if mount is not primary or name not in primary.pages:
+                        raise ValueError(f'Render page is not HTML in the primary archive: {path}')
+                    page = context.new_page()
+                    page.on('pageerror', lambda error: self.errors.append(f'Render error: {error}'))
+                    page.goto(url, wait_until='networkidle')
+                    # Collect all IDs first, so links between rendered pages can resolve.
+                    self.rendered_ids[(primary.root, name)] = set(page.locator('[id], a[name]').evaluate_all(
+                        '(nodes) => nodes.map(node => node.id || node.getAttribute("name"))'))
+                    documents.append((page.url, page.locator('[href], [src]').evaluate_all(
+                        '(nodes) => nodes.filter(n => n.tagName !== "BASE").map(n => '
+                        'n.getAttribute("href") || n.getAttribute("src"))'),
+                        page.evaluate('document.baseURI')))
+                    self.rendered += 1
+                    page.close()
             for origin, links, base in documents:
                 for href in links:
                     self.check(origin, href, base, rendered=True)
