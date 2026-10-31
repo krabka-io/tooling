@@ -138,6 +138,8 @@ jobs:
         run: |
           python3 -m unittest discover -s actions/upload-rustdoc-pages -p 'test_*.py' -v
           python3 -m unittest discover -s patches/rustdoc -p 'test_*.py' -v
+      - name: Composed archive regressions
+        run: python3 -m unittest discover -s actions/validate-composed-pages -p 'test_*.py' -v
       - name: Render source fixture and inject excluded files
         shell: bash
         run: |

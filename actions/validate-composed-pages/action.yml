@@ -1,0 +1,33 @@
+name: Validate composed Pages
+description: Validate the full site graph from a pinned archive lock and optional local candidate.
+inputs:
+  manifest:
+    description: Site-owned lockfile of exact artifact identities and digests.
+    required: true
+  candidate:
+    description: Optional JSON describing exactly one local candidate archive override.
+    default: ''
+  report:
+    description: JSON report path; emitted on validation failures as well as success.
+    default: composed-pages-report.json
+outputs:
+  report:
+    description: Path to the JSON validation report.
+    value: ${{ inputs.report }}
+runs:
+  using: composite
+  steps:
+    - name: Validate all mounted archives
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        COMPOSITION_MANIFEST: ${{ inputs.manifest }}
+        COMPOSITION_CANDIDATE: ${{ inputs.candidate }}
+        COMPOSITION_REPORT: ${{ inputs.report }}
+      run: |
+        set -euo pipefail
+        options=(--manifest "${COMPOSITION_MANIFEST}" --report "${COMPOSITION_REPORT}" --work-dir "${RUNNER_TEMP}")
+        if [[ -n "${COMPOSITION_CANDIDATE}" ]]; then
+          options+=(--candidate "${COMPOSITION_CANDIDATE}")
+        fi
+        python3 "${ACTION_PATH}/compose.py" "${options[@]}"
