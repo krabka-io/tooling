@@ -160,7 +160,6 @@ def execute(manifest_path, candidate_path, work, report):
             archive, provenance = candidate[1:]
         else:
             provenance = {**component, 'source': 'baseline'}
-            entry.update(provenance)
             directory = work / component['id']
             directory.mkdir()
             archive = fetch(component, directory)
