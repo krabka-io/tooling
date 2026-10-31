@@ -163,3 +163,11 @@ CI tests known-bad and corrected archives. The tests cover missing Source HTML,
 malformed Rust references, missing fragments, component mounts, and links
 inserted by an archived script. The real-rustdoc fixture also passes through
 the pinned Pages upload action and the final archive gate.
+
+### Baseline retention
+
+`retention-days` defaults to 90 and is forwarded to the Pages uploader. Repository
+or organization policy can impose a shorter limit. Retention is finite: refresh
+and review the composition lock before any referenced artifact expires. Existing
+artifacts are not extended by changing this input. Expired or deleted baseline
+artifacts remain hard failures; validation never silently selects a replacement.

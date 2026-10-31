@@ -7,6 +7,9 @@ inputs:
   site-url:
     description: Public URL of the archive root, including the deployment prefix.
     default: https://pages.invalid/
+  retention-days:
+    description: Days to retain the Pages archive for pinned composition baselines, subject to repository limits.
+    default: '90'
   component-archives:
     description: Optional JSON file with site_url and archive entries for cross-component checks.
     default: ''
@@ -48,6 +51,7 @@ runs:
         path: ${{ steps.stage.outputs.path }}
         # Never enable this on the checkout or raw build output.
         include-hidden-files: true
+        retention-days: ${{ inputs.retention-days }}
 
     - name: Verify the final Pages archive
       shell: bash
