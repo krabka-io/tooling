@@ -7,11 +7,23 @@ inputs:
   site-url:
     description: Public URL of the archive root, including the deployment prefix.
     default: https://pages.invalid/
+  retention-days:
+    description: Days to retain the Pages archive for pinned composition baselines, subject to repository limits.
+    default: '90'
   component-archives:
     description: Optional JSON file with site_url and archive entries for cross-component checks.
     default: ''
   render-pages:
     description: Optional JSON file listing archive-relative pages for installed Playwright Chromium checks.
+    default: ''
+  composition-lock:
+    description: Optional pinned full-site archive lock; requires component-id. Replaces the standalone link check with full graph validation.
+    default: ''
+  component-id:
+    description: Component replaced by this build in composition-lock; requires composition-lock.
+    default: ''
+  candidate-head-sha:
+    description: Candidate commit override; defaults to the pull request head SHA or workflow SHA.
     default: ''
 outputs:
   link-report:
@@ -39,6 +51,7 @@ runs:
         path: ${{ steps.stage.outputs.path }}
         # Never enable this on the checkout or raw build output.
         include-hidden-files: true
+        retention-days: ${{ inputs.retention-days }}
 
     - name: Verify the final Pages archive
       shell: bash
@@ -52,13 +65,44 @@ runs:
     - name: Check links in the final Pages archive
       shell: bash
       env:
+        STAGED_PATH: ${{ steps.stage.outputs.path }}
         ACTION_PATH: ${{ github.action_path }}
         SITE_URL: ${{ inputs.site-url }}
         COMPONENT_ARCHIVES: ${{ inputs.component-archives }}
         RENDER_PAGES: ${{ inputs.render-pages }}
         LINK_REPORT: ${{ steps.stage.outputs.report }}
+        COMPOSITION_LOCK: ${{ inputs.composition-lock }}
+        COMPONENT_ID: ${{ inputs.component-id }}
+        CANDIDATE_SHA: ${{ inputs.candidate-head-sha || github.event.pull_request.head.sha || github.sha }}
       run: |
         set -euo pipefail
+        if [[ -n "${COMPOSITION_LOCK}" || -n "${COMPONENT_ID}" ]]; then
+          if [[ -z "${COMPOSITION_LOCK}" || -z "${COMPONENT_ID}" || -n "${COMPONENT_ARCHIVES}" || -n "${RENDER_PAGES}" ]]; then
+            python3 - <<'PYTHON'
+        import json, os
+        from pathlib import Path
+        Path(os.environ['LINK_REPORT']).write_text(json.dumps({
+            'status': 'failed', 'errors': ['composition-lock and component-id must be supplied together; composition lock owns component archives and render pages']}) + '\n')
+        PYTHON
+            exit 1
+          fi
+          candidate_path="${STAGED_PATH}/../candidate.json"
+          export CANDIDATE_PATH="${candidate_path}"
+          python3 - <<'PYTHON'
+        import json, os
+        from pathlib import Path
+        Path(os.environ['CANDIDATE_PATH']).write_text(json.dumps({
+            'id': os.environ['COMPONENT_ID'],
+            'archive': str(Path(os.environ['RUNNER_TEMP']) / 'artifact.tar'),
+            'repo': os.environ['GITHUB_REPOSITORY'],
+            'head_sha': os.environ['CANDIDATE_SHA'],
+            'run_id': int(os.environ['GITHUB_RUN_ID'])}) + '\n')
+        PYTHON
+          python3 "${ACTION_PATH}/../validate-composed-pages/compose.py" \
+            --manifest "${COMPOSITION_LOCK}" --candidate "${candidate_path}" \
+            --report "${LINK_REPORT}" --work-dir "${RUNNER_TEMP}"
+          exit 0
+        fi
         options=(--site-url "${SITE_URL}" --report "${LINK_REPORT}")
         if [[ -n "${COMPONENT_ARCHIVES}" ]]; then
           options+=(--components "${COMPONENT_ARCHIVES}")

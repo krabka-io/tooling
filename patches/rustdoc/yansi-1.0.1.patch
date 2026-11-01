@@ -1,0 +1,109 @@
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -342,3 +342,4 @@
++#![doc(html_root_url = "https://docs.rs/yansi/1.0.1/")]
+ #![doc(html_logo_url = "https://raw.githubusercontent.com/SergioBenitez/yansi/master/.github/yansi-logo.png")]
+ #![cfg_attr(not(feature = "std"), no_std)]
+ #![cfg_attr(feature = "_nightly", feature(doc_cfg))]
+diff --git a/src/macros.rs b/src/macros.rs
+--- a/src/macros.rs
++++ b/src/macros.rs
+@@ -33,7 +33,7 @@
+         $(#[$pattr:meta])* $prop:ident => $V:path $([$($a:ident : $T:ty),+])?
+     ) => {
+         /// Returns `self` with the
+-        #[doc = concat!("[`", stringify!($p), "()`](Self::", stringify!($p), "())")]
++        #[doc = concat!("[`", stringify!($p), "()`](crate::Paint::", stringify!($p), "())")]
+         /// set to
+         #[doc = concat!("[`", stringify!($V), "`].")]
+         ///
+@@ -71,7 +71,7 @@
+         $(#[$pattr:meta])* $prop:ident => $V:path $([$($a:ident : $T:ty),+])?
+     ) => {
+         /// Returns `self` with the
+-        #[doc = concat!("[`", stringify!($p), "()`](Self::", stringify!($p), "())")]
++        #[doc = concat!("[`", stringify!($p), "()`](crate::Paint::", stringify!($p), "())")]
+         /// set to
+         #[doc = concat!("[`", stringify!($V), "`].")]
+         ///
+@@ -158,8 +158,8 @@
+     /// `value`.
+     ///
+     /// This method should be used rarely. Instead, prefer to use color-specific
+-    /// builder methods like [`red()`](Self::red()) and
+-    /// [`green()`](Self::green()), which have the same functionality but are
++    /// builder methods like [`red()`](crate::Paint::red()) and
++    /// [`green()`](crate::Paint::green()), which have the same functionality but are
+     /// pithier.
+     ///
+     /// # Example
+@@ -173,7 +173,7 @@
+     /// painted.fg(Color::White);
+     /// ```
+     ///
+-    /// Set foreground color to white using [`white()`](Self::white()).
++    /// Set foreground color to white using [`white()`](crate::Paint::white()).
+     ///
+     /// ```rust
+     /// use yansi::Paint;
+@@ -207,8 +207,8 @@
+     /// `value`.
+     ///
+     /// This method should be used rarely. Instead, prefer to use color-specific
+-    /// builder methods like [`on_red()`](Self::on_red()) and
+-    /// [`on_green()`](Self::on_green()), which have the same functionality but
++    /// builder methods like [`on_red()`](crate::Paint::on_red()) and
++    /// [`on_green()`](crate::Paint::on_green()), which have the same functionality but
+     /// are pithier.
+     ///
+     /// # Example
+@@ -222,7 +222,7 @@
+     /// painted.bg(Color::Red);
+     /// ```
+     ///
+-    /// Set background color to red using [`on_red()`](Self::on_red()).
++    /// Set background color to red using [`on_red()`](crate::Paint::on_red()).
+     ///
+     /// ```rust
+     /// use yansi::Paint;
+@@ -255,8 +255,8 @@
+     /// Enables the styling [`Attribute`] `value`.
+     ///
+     /// This method should be used rarely. Instead, prefer to use
+-    /// attribute-specific builder methods like [`bold()`](Self::bold()) and
+-    /// [`underline()`](Self::underline()), which have the same functionality
++    /// attribute-specific builder methods like [`bold()`](crate::Paint::bold()) and
++    /// [`underline()`](crate::Paint::underline()), which have the same functionality
+     /// but are pithier.
+     ///
+     /// # Example
+@@ -270,7 +270,7 @@
+     /// painted.attr(Attribute::Bold);
+     /// ```
+     ///
+-    /// Make text bold using using [`bold()`](Self::bold()).
++    /// Make text bold using using [`bold()`](crate::Paint::bold()).
+     ///
+     /// ```rust
+     /// use yansi::Paint;
+@@ -293,8 +293,8 @@
+     /// Enables the `yansi` [`Quirk`] `value`.
+     ///
+     /// This method should be used rarely. Instead, prefer to use quirk-specific
+-    /// builder methods like [`mask()`](Self::mask()) and
+-    /// [`wrap()`](Self::wrap()), which have the same functionality but are
++    /// builder methods like [`mask()`](crate::Paint::mask()) and
++    /// [`wrap()`](crate::Paint::wrap()), which have the same functionality but are
+     /// pithier.
+     ///
+     /// # Example
+@@ -308,7 +308,7 @@
+     /// painted.quirk(Quirk::Wrap);
+     /// ```
+     ///
+-    /// Enable wrapping using [`wrap()`](Self::wrap()).
++    /// Enable wrapping using [`wrap()`](crate::Paint::wrap()).
+     ///
+     /// ```rust
+     /// use yansi::Paint;
