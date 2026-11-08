@@ -1,0 +1,173 @@
+# Publishes the AXL module as a GitHub release asset.
+#
+# A consumer pins the module with `axl_archive_dep`. A GitHub release asset is a
+# fixed file, so its digest does not change. The asset also downloads in places
+# where `github.com/<owner>/<repo>/archive/...` is blocked, for example in a
+# Claude Code cloud sandbox that does not have this repository attached.
+#
+# To cut a release, push a tag `vX.Y.Z` on a commit of `main`:
+#
+#   git tag v0.1.0 origin/main
+#   git push origin v0.1.0
+#
+# The workflow then creates release `v0.1.0` with these assets:
+#
+#   tooling-0.1.0.tar.gz         the module tree under the prefix `tooling-0.1.0/`
+#   tooling-0.1.0.tar.gz.sha512  the `integrity` value for `axl_archive_dep`
+#
+# The release notes hold the `axl_archive_dep` block to paste into a consumer.
+# On a pull request the workflow builds and checks the archive and publishes
+# nothing.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - MODULE.aspect
+      - aspect/**
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  axl-module:
+    name: axl-module
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Keep temporary files off the size-limited /tmp tmpfs
+        run: echo "TMPDIR=${RUNNER_TEMP}" >> "${GITHUB_ENV}"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The tag check below needs the history of `main`.
+          fetch-depth: 0
+
+      - name: Find the version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            tag="${GITHUB_REF_NAME}"
+            if ! [[ "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::tag ${tag} is not vX.Y.Z"
+              exit 1
+            fi
+            if ! git merge-base --is-ancestor HEAD origin/main; then
+              echo "::error::tag ${tag} is not on main"
+              exit 1
+            fi
+            version="${tag#v}"
+          else
+            tag=""
+            version="0.0.0-pr${{ github.event.pull_request.number }}"
+          fi
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "prefix=tooling-${version}" >> "${GITHUB_OUTPUT}"
+          echo "asset=tooling-${version}.tar.gz" >> "${GITHUB_OUTPUT}"
+
+      # The archive holds the module and its licence files, and nothing else.
+      # `git archive` takes the file times from the commit, and `gzip -n`
+      # leaves out the name and time of the input, so a rebuild of the same
+      # commit gives the same bytes.
+      - name: Build the module archive
+        shell: bash
+        env:
+          PREFIX: ${{ steps.version.outputs.prefix }}
+          ASSET: ${{ steps.version.outputs.asset }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          git archive --format=tar --prefix="${PREFIX}/" HEAD \
+            MODULE.aspect aspect LICENSE NOTICE \
+            | gzip -n -9 > "dist/${ASSET}"
+          echo "sha512-$(openssl dgst -sha512 -binary "dist/${ASSET}" | base64 -w0)" \
+            > "dist/${ASSET}.sha512"
+          tar -tzf "dist/${ASSET}"
+          cat "dist/${ASSET}.sha512"
+
+      # Every `use_task` and `load` target must be in the archive, because the
+      # Aspect CLI does not resolve dependencies of a module.
+      - name: Check the module archive
+        shell: bash
+        env:
+          PREFIX: ${{ steps.version.outputs.prefix }}
+          ASSET: ${{ steps.version.outputs.asset }}
+        run: |
+          set -euo pipefail
+          tree="${RUNNER_TEMP}/module"
+          rm -rf "${tree}"
+          mkdir -p "${tree}"
+          tar -xzf "dist/${ASSET}" -C "${tree}"
+          root="${tree}/${PREFIX}"
+          status=0
+          while IFS= read -r target; do
+            if [ ! -f "${root}/${target}" ]; then
+              echo "::error::MODULE.aspect uses ${target}, which is not in the archive"
+              status=1
+            fi
+          done < <(sed -n 's/^use_task("\([^"]*\)".*/\1/p' "${root}/MODULE.aspect")
+          while IFS= read -r line; do
+            file="${line%%:*}"
+            target="$(sed -n 's/.*load(\s*"\([^"]*\)".*/\1/p' <<< "${line#*:}")"
+            [ -n "${target}" ] || continue
+            if [ ! -f "$(dirname "${file}")/${target}" ]; then
+              echo "::error::${file#"${root}/"} loads ${target}, which is not in the archive"
+              status=1
+            fi
+          done < <(grep -H 'load(' "${root}"/aspect/*.axl)
+          # A `load(` on its own line names its target on the next line.
+          while IFS= read -r file; do
+            while IFS= read -r target; do
+              if [ ! -f "$(dirname "${file}")/${target}" ]; then
+                echo "::error::${file#"${root}/"} loads ${target}, which is not in the archive"
+                status=1
+              fi
+            done < <(sed -n '/^load($/{n;s/^\s*"\([^"]*\)".*/\1/p}' "${file}")
+          done < <(ls "${root}"/aspect/*.axl)
+          exit "${status}"
+
+      - name: Publish the release
+        if: steps.version.outputs.tag != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          PREFIX: ${{ steps.version.outputs.prefix }}
+          ASSET: ${{ steps.version.outputs.asset }}
+        run: |
+          set -euo pipefail
+          integrity="$(cat "dist/${ASSET}.sha512")"
+          url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/${ASSET}"
+          cat > "${RUNNER_TEMP}/notes.md" <<EOF
+          The AXL module of this repository at ${TAG} (commit ${GITHUB_SHA}).
+
+          Write this block in the \`MODULE.aspect\` of a consumer:
+
+          \`\`\`python
+          axl_archive_dep(
+              name = "krabka_tooling",
+              urls = ["${url}"],
+              integrity = "${integrity}",
+              strip_prefix = "${PREFIX}",
+              auto_use_tasks = True,
+              dev = True,
+          )
+          \`\`\`
+          EOF
+          gh release create "${TAG}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "${TAG}" \
+            --notes-file "${RUNNER_TEMP}/notes.md" \
+            --verify-tag \
+            "dist/${ASSET}" "dist/${ASSET}.sha512"

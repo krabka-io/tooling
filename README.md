@@ -64,15 +64,17 @@ is separate from the AXL module pin.
 
 ## How a repository consumes the AXL module
 
-The root `MODULE.aspect` of this repository is an AXL module. A consumer adds
-it to its own `MODULE.aspect` as an archive dependency:
+The root `MODULE.aspect` of this repository is an AXL module. Each release
+`vX.Y.Z` of this repository carries the module as the asset
+`tooling-X.Y.Z.tar.gz`. A consumer adds it to its own `MODULE.aspect` as an
+archive dependency:
 
 ```python
 axl_archive_dep(
     name = "krabka_tooling",
-    urls = ["https://github.com/krabka-io/tooling/archive/0123456789abcdef0123456789abcdef01234567.tar.gz"],
+    urls = ["https://github.com/krabka-io/tooling/releases/download/vX.Y.Z/tooling-X.Y.Z.tar.gz"],
     integrity = "sha512-...",
-    strip_prefix = "tooling-0123456789abcdef0123456789abcdef01234567",
+    strip_prefix = "tooling-X.Y.Z",
     auto_use_tasks = True,
     dev = True,
 )
@@ -82,22 +84,41 @@ axl_archive_dep(
 Aspect CLI accepts only `.tar.gz` archives. It does not resolve dependencies of
 a module, so the module holds everything it needs.
 
+Pin a release asset. Do not pin `github.com/krabka-io/tooling/archive/<ref>`.
+A Claude Code cloud sandbox that does not have this repository attached gets
+403 for that URL, and the Aspect CLI then fails before it runs any task. The
+same sandbox can download a release asset.
+
 The module exports only `rustdoc-site`. The `axl-tests` task in `.aspect/`
 serves this repository and is not exported. Every consumer defines its own
 `axl-tests` task, and a second task with that name would break it.
 
-To move a consumer to a newer revision:
+### Cutting a release
 
-1. Pick a tag or a commit of this repository. Build the archive URL from it:
-   `https://github.com/krabka-io/tooling/archive/<ref>.tar.gz`.
-2. Compute the digest of the archive and prefix it with `sha512-`:
+The [`release`](.github/workflows/release.yml) workflow publishes the asset.
+A maintainer pushes a tag `vX.Y.Z` on a commit of `main`:
+
+```
+git tag vX.Y.Z origin/main
+git push origin vX.Y.Z
+```
+
+The workflow builds `tooling-X.Y.Z.tar.gz` from `MODULE.aspect`, `aspect/`,
+`LICENSE` and `NOTICE`, under the prefix `tooling-X.Y.Z/`. It checks that every
+file the module loads is in the archive. It then creates the release with the
+archive and `tooling-X.Y.Z.tar.gz.sha512`, which holds the `integrity` value.
+The release notes hold the `axl_archive_dep` block to paste into a consumer.
+
+### Moving a consumer to a newer release
+
+1. Pick a release of this repository.
+2. Copy the `axl_archive_dep` block from its release notes into the
+   `MODULE.aspect` of the consumer.
+3. To check the digest, download the asset and compute it:
 
    ```
-   curl -sL <url> | openssl dgst -sha512 -binary | openssl base64 -A
+   echo "sha512-$(openssl dgst -sha512 -binary tooling-X.Y.Z.tar.gz | base64 -w0)"
    ```
-
-3. Write the new URL, `integrity` and `strip_prefix` in `MODULE.aspect`. The
-   prefix is `tooling-<ref>`. For a tag, drop a leading `v` from the ref.
 
 A consumer must not keep its own copy of `rustdoc_site.axl`, `theme.axl`,
 `testing.axl` or `repo.axl`. A fix goes in this repository, and each consumer
