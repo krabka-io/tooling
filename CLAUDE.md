@@ -80,6 +80,6 @@ Conventional commits drive the bumps:
 - `fix:` gives a patch version bump
 - `feat!:` gives a major version bump
 
-This repository is not released. It has no version and publishes nothing. Use
-conventional commits here anyway, because the same convention is in the
-changelog template it ships.
+This repository publishes the AXL module as a versioned release asset. Follow
+the release steps in README.md. Use conventional commits here, because the
+same convention is in the changelog template it ships.

@@ -1,0 +1,15 @@
+name: CI gate
+description: Require successful CI dependencies before a pull request or merge group can merge.
+inputs:
+  results:
+    description: The complete needs context, passed with toJSON(needs).
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Check every required job
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        GATE_RESULTS: ${{ inputs.results }}
+      run: node "${ACTION_PATH}/check.mjs"
