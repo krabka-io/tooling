@@ -18,6 +18,7 @@ shared `rustdoc-site` task of the Aspect CLI, and a Pages upload action.
 | [`packaging/`](packaging/README.md) | The Creusot verifier toolchain recipe and a local-binary Dockerfile | krabka-broker, local runs |
 | [`aspect/`](aspect/) | The AXL module that exports the `rustdoc-site` task, and the Krabka theme of the pages it publishes | Every krabka-io Rust repository that publishes API documentation |
 | [`actions/upload-rustdoc-pages/`](actions/upload-rustdoc-pages/) | Filtered Pages packaging and final archive validation | Every krabka-io Rust repository that publishes API documentation |
+| [`actions/gate/`](actions/gate/) | One required CI check for pull requests and merge groups | Every krabka-io repository |
 | [`scripts/`](scripts/) | Repository-agnostic check scripts | Named per script below |
 | [`charts/`](charts/README.md) | The Helm chart signing public key | `krabka-operator`, `krabka-rebalancer`, `krabka-schema-registry` |
 
@@ -51,6 +52,32 @@ jobs:
 Configuration is the exception. `release-plz` reads its two TOML files from the
 root of the repository it releases and cannot fetch them, so those are copied.
 [`release/README.md`](release/README.md) states the whole contract.
+
+## How a repository consumes the CI gate
+
+Run CI on `pull_request`, `merge_group` and pushes to the default branch.
+Add a job named `gate`. List every required CI job in its `needs` field.
+Pin the action to a reviewed commit:
+
+```yaml
+  gate:
+    name: gate
+    if: always()
+    needs: [build, test]
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: krabka-io/tooling/actions/gate@COMMIT_SHA
+        with:
+          results: ${{ toJSON(needs) }}
+          # Set only for lanes that have a job-level condition.
+          allow-skipped: nightly
+```
+
+Require the `gate` check in the repository rules. Enable the merge queue.
+The action rejects failed, cancelled and unknown job results. It permits
+skipped jobs only for IDs in `allow-skipped`, a comma-separated list. Leave
+this input empty when every job must run. At least one required job must succeed.
+The `if: always()` condition makes the gate report failures in its dependencies.
 
 ## How a repository consumes the Pages upload action
 

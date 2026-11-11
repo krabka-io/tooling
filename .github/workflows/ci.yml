@@ -12,11 +12,12 @@ on:
   push:
     branches: [main]
   pull_request:
+  merge_group:
   workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
   contents: read
@@ -53,6 +54,9 @@ jobs:
 
       - name: python compiles
         run: python3 -m compileall -q release actions
+
+      - name: CI gate regressions
+        run: node --test actions/gate/check.test.mjs
 
       # `check-publish-allowlist.sh` embeds a Python program in a heredoc, so
       # `compileall` never sees it. This extracts that program and compiles it.
@@ -175,6 +179,18 @@ jobs:
       - name: Keep temporary files off the size-limited /tmp tmpfs
         run: echo "TMPDIR=${RUNNER_TEMP}" >> "${GITHUB_ENV}"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: aspect-build/setup-aspect@2306377a61c45954ab2df7c7311698b109364352 # v2026.26.9
+      - uses: aspect-build/setup-aspect@ccc445383a7d4cea499744d823a7698ae077a407 # 2026.45
       - name: axl tests
         run: aspect axl-tests
+
+  gate:
+    name: gate
+    if: always()
+    needs: [syntax, rustdoc-pages, axl-tests]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./actions/gate
+        with:
+          results: ${{ toJSON(needs) }}
