@@ -123,6 +123,8 @@ serves this repository and is not exported. Every consumer defines its own
 ### Cutting a release
 
 The [`release`](.github/workflows/release.yml) workflow publishes the asset.
+CI runs the same archive validation for pull requests and merge groups before
+the required `gate` check. Only the tag publishing job has write permission.
 A maintainer pushes a tag `vX.Y.Z` on a commit of `main`:
 
 ```
