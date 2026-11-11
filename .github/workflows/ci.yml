@@ -183,10 +183,13 @@ jobs:
       - name: axl tests
         run: aspect axl-tests
 
+  axl-module:
+    uses: ./.github/workflows/module-archive.yml
+
   gate:
     name: gate
     if: always()
-    needs: [syntax, rustdoc-pages, axl-tests]
+    needs: [syntax, rustdoc-pages, axl-tests, axl-module]
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
