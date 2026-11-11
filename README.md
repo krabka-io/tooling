@@ -69,11 +69,14 @@ Pin the action to a reviewed commit:
       - uses: krabka-io/tooling/actions/gate@COMMIT_SHA
         with:
           results: ${{ toJSON(needs) }}
+          # Set only for lanes that have a job-level condition.
+          allow-skipped: nightly
 ```
 
 Require the `gate` check in the repository rules. Enable the merge queue.
 The action rejects failed, cancelled and unknown job results. It permits
-skipped jobs for conditional lanes. At least one required job must succeed.
+skipped jobs only for IDs in `allow-skipped`, a comma-separated list. Leave
+this input empty when every job must run. At least one required job must succeed.
 The `if: always()` condition makes the gate report failures in its dependencies.
 
 ## How a repository consumes the Pages upload action

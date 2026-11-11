@@ -5,7 +5,17 @@ import test from 'node:test';
 import { check } from './check.mjs';
 
 test('successful jobs and conditional skipped lanes pass', () => {
-  check({ build: { result: 'success' }, nightly: { result: 'skipped' } });
+  check({ build: { result: 'success' }, nightly: { result: 'skipped' } }, ['nightly']);
+});
+
+test('required skipped jobs fail even when another job succeeds', () => {
+  assert.throws(() => check({ build: { result: 'success' }, tests: { result: 'skipped' } }), /tests=skipped/);
+});
+
+test('a conditional lane cannot fail or cancel', () => {
+  for (const result of ['failure', 'cancelled']) {
+    assert.throws(() => check({ build: { result: 'success' }, nightly: { result } }, ['nightly']), /nightly=/);
+  }
 });
 
 for (const result of ['failure', 'cancelled', 'queued', undefined]) {
@@ -33,3 +43,14 @@ for (const [results, status] of [
     assert.equal(process.status, status, process.stderr);
   });
 }
+
+test('CLI accepts only named conditional skips', () => {
+  const process = spawnSync('node', [fileURLToPath(new URL('./check.mjs', import.meta.url))], {
+    env: { ...globalThis.process.env,
+      GATE_RESULTS: '{"build":{"result":"success"},"nightly":{"result":"skipped"}}',
+      GATE_ALLOW_SKIPPED: ' docker, nightly ',
+    },
+    encoding: 'utf8',
+  });
+  assert.equal(process.status, 0, process.stderr);
+});
