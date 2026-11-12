@@ -560,6 +560,57 @@ def write_site(fs, out, repo, crates):
     # underscore-prefixed paths.
     fs.write(out + "/.nojekyll", "")
 
+def empty_implementor_plan(fs, out, lines):
+    """Validate exact page/tab/script pairs before changing any page.
+
+    The consumer owns this list. Keep each existing script. Remove a missing
+    script tag only beside the known empty rustdoc implementor list.
+    """
+    edits = {}
+    errors = []
+    seen = {}
+    for number, line in enumerate(lines):
+        if not line.strip() or line.startswith("#"):
+            continue
+        fields = line.split("\t")
+        if len(fields) != 2:
+            errors.append("empty implementors line %d: expected page and script separated by a tab" % (number + 1))
+            continue
+        page, script = fields
+        path = normalize_path(out + "/" + page)
+        target = normalize_path(path.rsplit("/", 1)[0] + "/" + script)
+        if not page.endswith(".html") or page.startswith("/") or script.startswith("/") or ":" in script or path != out + "/" + page or not target.startswith(out + "/") or "/trait.impl/" not in target or not target.endswith(".js") or any([char in script for char in ['"', "<", ">", "?", "#", "\\"]]):
+            errors.append("invalid empty implementor pair: %s" % page)
+            continue
+        if page in seen:
+            errors.append("duplicate empty implementor page: %s" % page)
+            continue
+        seen[page] = True
+        if not is_file(fs, path):
+            errors.append("missing empty implementor page: %s" % page)
+            continue
+        if fs.exists(target):
+            if not is_file(fs, target):
+                errors.append("implementor asset is not a file: %s" % script)
+            continue
+        text = fs.read_to_string(path)
+        tag = '<script src="%s" async></script>' % script
+        empty = '<div id="implementors-list"></div>'
+        # An absent tag permits repeated execution only on the known empty page.
+        if text.count(empty) != 1 or text.count('id="implementors-list"') != 1 or text.count(tag) > 1 or (tag in text and empty + tag not in text):
+            errors.append("missing script does not follow one empty implementor list: %s" % page)
+        elif tag in text:
+            edits[path] = text.replace(tag, "")
+    return struct(edits = edits, errors = errors)
+
+def repair_empty_implementors(fs, out, lines):
+    """Apply the complete validated plan, or return errors without writes."""
+    plan = empty_implementor_plan(fs, out, lines)
+    if not plan.errors:
+        for path, text in plan.edits.items():
+            fs.write(path, text)
+    return plan
+
 def _impl(ctx: TaskContext) -> int:
     fs = ctx.std.fs
     root = ctx.std.env.bazel_root_dir()
@@ -589,6 +640,15 @@ def _impl(ctx: TaskContext) -> int:
 
     write_site(fs, out, _repository(fs, root, ctx.args.repo), crates)
 
+    if ctx.args.empty_implementors:
+        manifest = resolve_output(root, ctx.args.empty_implementors)
+        plan = repair_empty_implementors(fs, out, read_lines(fs, manifest))
+        for problem in plan.errors:
+            ctx.std.io.stderr.write(problem + "\n")
+        if plan.errors:
+            return 1
+        ctx.std.io.stdout.write("rustdoc-site: removed %d missing empty-implementor requests\n" % len(plan.edits))
+
     ctx.std.io.stdout.write("rustdoc-site: wrote %s from %d crates\n" % (out, len(crates)))
     return 0
 
@@ -596,6 +656,10 @@ rustdoc_site = task(
     summary = "Assemble the rendered rustdoc set into one static site",
     implementation = _impl,
     args = {
+        "empty_implementors": args.string(
+            default = "",
+            description = "Consumer TSV of exact page/script pairs for confirmed empty implementor requests.",
+        ),
         "output": args.string(
             default = "site",
             description = "Directory to write the site to, relative to the repository root.",

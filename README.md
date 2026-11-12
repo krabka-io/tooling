@@ -120,6 +120,21 @@ The module exports only `rustdoc-site`. The `axl-tests` task in `.aspect/`
 serves this repository and is not exported. Every consumer defines its own
 `axl-tests` task, and a second task with that name would break it.
 
+### Missing empty-implementor scripts
+
+Rustdoc can request a trait script that it does not write. A consumer can
+allowlist confirmed cases in a TSV file. Each row holds the assembled page
+path, a tab, and the exact script `src` value. Paths are relative to the site
+root and the page, respectively. Lines that start with `#` are comments.
+
+Run `aspect rustdoc-site --output site --empty-implementors docs/rustdoc-empty-implementors.tsv`.
+The task keeps existing assets. For missing assets, it requires the exact empty
+implementor list next to the script tag. It checks all rows before it changes
+any page. A populated list with a missing asset fails the task. The task removes
+only the listed missing script requests. Staging and archive checks still run.
+Each consumer owns its TSV. Release this module before adding the argument to
+a consumer workflow. Update the consumer's module release pin at the same time.
+
 ### Cutting a release
 
 The [`release`](.github/workflows/release.yml) workflow publishes the asset.
@@ -161,7 +176,7 @@ the rustdoc output of each crate. It prepends a font import to
 `static.files/favicon-<hash>.svg` with the Krabka logo. The override gives the
 light, dark and ayu themes of rustdoc one dark palette, so the theme picker
 cannot show a page that clashes with krabka.io. The task does not change any
-HTML file. `landing_style()` styles the landing page and the redirect pages.
+HTML file unless the consumer passes an empty-implementor allowlist. `landing_style()` styles the landing page and the redirect pages.
 
 To run the unit tests of the module, run `aspect axl-tests` at the root of this
 repository.

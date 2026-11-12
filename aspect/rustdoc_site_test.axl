@@ -3,6 +3,7 @@
 load(
     "./rustdoc_site.axl",
     "apply_theme",
+    "repair_empty_implementors",
     "copy_tree",
     "find_crates",
     "find_rustdoc",
@@ -805,7 +806,38 @@ def _test_write_site_writes_the_whole_tree(ctx):
     check_eq("the site's files", got, want)
     check_eq("the stale file is gone", fs.exists(root + "/site/stale.html"), False)
 
+def _test_empty_implementors_are_guarded(ctx):
+    fs = ctx.std.fs
+    empty = '<div id="implementors-list"></div>'
+    tag = '<script src="../trait.impl/demo/trait.Empty.js" async></script>'
+    other = '<script src="other.js"></script>'
+    root = temp_tree(ctx, {"demo/trait.Empty.html": empty + tag + other})
+    lines = ["demo/trait.Empty.html\t../trait.impl/demo/trait.Empty.js"]
+    plan = repair_empty_implementors(fs, root, lines)
+    check_eq("empty errors", plan.errors, [])
+    check_eq("only the missing request removed", fs.read_to_string(root + "/demo/trait.Empty.html"), empty + other)
+    check_eq("idempotent", repair_empty_implementors(fs, root, lines).edits, {})
+    fs.write(root + "/demo/trait.Empty.html", empty + tag)
+    fs.create_dir_all(root + "/trait.impl/demo")
+    fs.write(root + "/trait.impl/demo/trait.Empty.js", "real registration")
+    check_eq("existing asset keeps tag", repair_empty_implementors(fs, root, lines).edits, {})
+    fs.write(root + "/demo/trait.Empty.html", '<div id="implementors-list">real impl</div>' + tag)
+    check_eq("populated existing asset kept", repair_empty_implementors(fs, root, lines).errors, [])
+
+    root2 = temp_tree(ctx, {
+        "demo/trait.Empty.html": empty + tag,
+        "demo/trait.Full.html": '<div id="implementors-list">real impl</div>' + tag,
+    })
+    bad = repair_empty_implementors(fs, root2, lines + ["demo/trait.Full.html\t../trait.impl/demo/trait.Empty.js"])
+    check_eq("populated missing asset rejects whole plan", len(bad.errors), 1)
+    check_eq("no partial writes", fs.read_to_string(root2 + "/demo/trait.Empty.html"), empty + tag)
+    check_eq("escape rejected", len(repair_empty_implementors(fs, root2, ["demo/trait.Empty.html\t../../trait.impl/demo/trait.Empty.js"]).errors), 1)
+    check_eq("absolute request rejected", len(repair_empty_implementors(fs, root2, ["demo/trait.Empty.html\t/trait.impl/demo/trait.Empty.js"]).errors), 1)
+    check_eq("URL rejected", len(repair_empty_implementors(fs, root2, ["demo/trait.Empty.html\thttps://example.org/trait.impl/demo/trait.Empty.js"]).errors), 1)
+    check_eq("duplicate rejected", len(repair_empty_implementors(fs, root2, lines + lines).errors), 1)
+
 rustdoc_site_tests = suite("rustdoc-site", [
+    _test_empty_implementors_are_guarded,
     _test_manifest_field_reads_the_package_section,
     _test_manifest_field_decodes_basic_string_escapes,
     _test_manifest_field_reads_literal_strings_as_written,
